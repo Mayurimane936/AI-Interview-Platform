@@ -9,6 +9,7 @@ from app.api.interviews import router as interview_router
 from app.api.questions import router as question_router
 from pathlib import Path
 from dotenv import load_dotenv
+from app.api.analytics import router as analytics_router
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -48,6 +49,12 @@ app.include_router(
     question_router,
     prefix="/questions",
     tags=["Questions"],
+)
+
+app.include_router(
+    analytics_router,    
+    prefix="/analytics",
+    tags=["Analytics"],
 )
 
 @app.get("/")

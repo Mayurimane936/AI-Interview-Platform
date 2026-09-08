@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.database import Base
@@ -9,6 +9,14 @@ from app.core.database import Base
 
 class Answer(Base):
     __tablename__ = "answers"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "interview_id",
+            "question_id",
+            name="uq_answers_interview_question",
+        ),
+    )
 
     id = Column(
         UUID(as_uuid=True),

@@ -206,8 +206,25 @@ def submit_answer(
             status_code=404,
             detail="Question not found for this interview",
         )
+    
+     # 4. if exisiting answer/ already answered
+    existing_answer = (
+        db.query(Answer)
+        .filter(
+            Answer.interview_id == interview_id,
+            Answer.question_id == answer_data.question_id,
+        )
+        .first()
+    )
 
-    # 4. Create answer
+    if existing_answer:
+        raise HTTPException(
+            status_code=400,
+            detail="This question has already been answered",
+        )
+
+
+    # 5. Create answer
     answer = Answer(
         interview_id=interview_id,
         question_id=answer_data.question_id,
@@ -232,6 +249,7 @@ def create_evaluation(
     user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # 1. Verify interview belongs to current user
     interview = (
         db.query(Interview)
         .filter(
@@ -242,10 +260,12 @@ def create_evaluation(
     )
 
     if not interview:
-        return {
-            "message": "Interview not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Interview not found",
+        )
 
+    # 2. Verify answer belongs to this interview
     answer = (
         db.query(Answer)
         .filter(
@@ -256,10 +276,12 @@ def create_evaluation(
     )
 
     if not answer:
-        return {
-            "message": "Answer not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Answer not found for this interview",
+        )
 
+    # 3. Verify question belongs to this interview
     question = (
         db.query(Question)
         .filter(
@@ -270,10 +292,12 @@ def create_evaluation(
     )
 
     if not question:
-        return {
-            "message": "Question not found"
-        }
-    
+        raise HTTPException(
+            status_code=404,
+            detail="Question not found for this interview",
+        )
+
+    # 4. Don't evaluate the same answer twice
     existing_evaluation = (
         db.query(Evaluation)
         .filter(
@@ -293,16 +317,25 @@ def create_evaluation(
                 "relevance": existing_evaluation.relevance,
                 "clarity": existing_evaluation.clarity,
                 "feedback": existing_evaluation.feedback,
-            }
+            },
         }
 
+    # 5. Send answer to AI
     ai_response = evaluate_answer(
         question.question_text,
         answer.answer_text,
     )
 
-    evaluation_result = json.loads(ai_response)
+    # 6. Parse AI response
+    try:
+        evaluation_result = json.loads(ai_response)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=502,
+            detail="AI returned an invalid evaluation response",
+        )
 
+    # 7. Save evaluation
     evaluation = Evaluation(
         answer_id=answer.id,
         score=evaluation_result["score"],
@@ -313,9 +346,39 @@ def create_evaluation(
     )
 
     db.add(evaluation)
-    db.commit()
-    db.refresh(evaluation)
 
+    try:
+        db.commit()
+        db.refresh(evaluation)
+
+    except IntegrityError:
+        db.rollback()
+
+        existing_evaluation = (
+            db.query(Evaluation)
+            .filter(
+                Evaluation.answer_id == answer.id
+            )
+            .first()
+        )
+
+        if existing_evaluation:
+            return {
+                "message": "This answer has already been evaluated",
+                "evaluation": {
+                    "id": str(existing_evaluation.id),
+                    "answer_id": str(existing_evaluation.answer_id),
+                    "score": existing_evaluation.score,
+                    "correctness": existing_evaluation.correctness,
+                    "relevance": existing_evaluation.relevance,
+                    "clarity": existing_evaluation.clarity,
+                    "feedback": existing_evaluation.feedback,
+                },
+            }
+
+        raise
+
+    # 8. Return evaluation
     return {
         "id": str(evaluation.id),
         "answer_id": str(evaluation.answer_id),
@@ -325,7 +388,6 @@ def create_evaluation(
         "clarity": evaluation.clarity,
         "feedback": evaluation.feedback,
     }
-
 
 @router.post("/{interview_id}/complete")
 def complete_interview(
