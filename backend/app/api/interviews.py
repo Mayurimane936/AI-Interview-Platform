@@ -89,6 +89,37 @@ def create_interview(
         "status": interview.status,
     }
 
+
+@router.get("/{interview_id}")
+def get_interview(
+    interview_id: str,
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    interview = (
+        db.query(Interview)
+        .filter(
+            Interview.id == interview_id,
+            Interview.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not interview:
+        raise HTTPException(
+            status_code=404,
+            detail="Interview not found",
+        )
+
+    return {
+        "id": str(interview.id),
+        "topic": interview.topic,
+        "difficulty": interview.difficulty,
+        "status": interview.status,
+        "started_at": interview.started_at,
+        "completed_at": interview.completed_at,
+    }
+
 @router.get("/{interview_id}/questions")
 def get_interview_questions(
     interview_id: str,
