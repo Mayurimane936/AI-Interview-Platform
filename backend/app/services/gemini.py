@@ -18,7 +18,6 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 # Models will be tried in this order.
-# The prompt and response format remain the same.
 EVALUATION_MODELS = [
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
@@ -26,7 +25,47 @@ EVALUATION_MODELS = [
 ]
 
 
-def generate_text(prompt: str) -> str:
+# =========================================================
+# QUESTION GENERATION
+# =========================================================
+
+def generate_text(
+    prompt: str,
+    existing_questions: list[str] | None = None,
+) -> str:
+
+    existing_questions = existing_questions or []
+
+    # -----------------------------------------------------
+    # Add previously generated questions as exclusions
+    # -----------------------------------------------------
+
+    if existing_questions:
+
+        excluded_questions = "\n".join(
+            f"{index + 1}. {question}"
+            for index, question
+            in enumerate(existing_questions)
+        )
+
+        prompt = f"""
+{prompt}
+
+IMPORTANT:
+The following questions have already been used for
+this topic and difficulty level.
+
+Do NOT generate these questions again.
+
+Do NOT generate questions that are simple
+rephrasings or paraphrases of these questions.
+
+Try to test different concepts whenever possible.
+
+Previously used questions:
+{excluded_questions}
+"""
+
     response = client.models.generate_content(
         model="gemini-3.5-flash-lite",
         contents=prompt,
@@ -38,7 +77,15 @@ def generate_text(prompt: str) -> str:
     return response.text
 
 
-def evaluate_answer(question: str, answer: str) -> str:
+# =========================================================
+# ANSWER EVALUATION
+# =========================================================
+
+def evaluate_answer(
+    question: str,
+    answer: str,
+) -> str:
+
     prompt = f"""
 You are an expert technical interviewer.
 

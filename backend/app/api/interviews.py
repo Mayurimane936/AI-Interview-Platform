@@ -23,13 +23,16 @@ from sqlalchemy import func
 router = APIRouter()
 
 
-
 @router.post("")
 def create_interview(
     interview_data: InterviewCreate,
     user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # =========================================================
+    # 1. CREATE INTERVIEW
+    # =========================================================
+
     interview = Interview(
         user_id=user_id,
         topic=interview_data.topic,
@@ -40,37 +43,85 @@ def create_interview(
     db.commit()
     db.refresh(interview)
 
-    prompt = f"""
-    You are an expert technical interviewer.
+    # =========================================================
+    # 2. GET PREVIOUS QUESTIONS
+    #    Same user + same topic + same difficulty
+    # =========================================================
 
-    Generate exactly 5 interview questions for:
-    Topic: {interview.topic}
-    Difficulty: {interview.difficulty}
+    existing_question_rows = (
+        db.query(Question.question_text)
+        .join(
+            Interview,
+            Question.interview_id == Interview.id
+        )
+        .filter(
+            Interview.user_id == user_id,
+            Interview.topic == interview.topic,
+            Interview.difficulty == interview.difficulty,
+        )
+        .all()
+    )
 
-    Return ONLY valid JSON in this exact format:
-
-    [
-    {{
-        "question_text": "question here",
-        "question_type": "technical",
-        "difficulty": "{interview.difficulty}",
-        "question_order": 1
-    }}
+    existing_questions = [
+        row[0]
+        for row in existing_question_rows
     ]
 
-    Rules:
-    - Generate exactly 5 questions.
-    - question_type must be "technical".
-    - question_order must be 1, 2, 3, 4, 5.
-    - Do not include markdown.
-    - Do not include any text outside the JSON.
-    """
+    print(
+        f"Found {len(existing_questions)} "
+        f"previous questions for "
+        f"{interview.topic} / {interview.difficulty}"
+    )
 
-    ai_response = generate_text(prompt)
+    # =========================================================
+    # 3. GENERATE NEW QUESTIONS
+    # =========================================================
+
+    prompt = f"""
+You are an expert technical interviewer.
+
+Generate exactly 5 interview questions for:
+
+Topic: {interview.topic}
+Difficulty: {interview.difficulty}
+
+The questions should test understanding of the topic
+at the requested difficulty level.
+
+Return ONLY valid JSON in this exact format:
+
+[
+{{
+    "question_text": "question here",
+    "question_type": "technical",
+    "difficulty": "{interview.difficulty}",
+    "question_order": 1
+}}
+]
+
+Rules:
+- Generate exactly 5 questions.
+- question_type must be "technical".
+- question_order must be 1, 2, 3, 4, 5.
+- Questions must match the requested topic.
+- Questions must match the requested difficulty.
+- Do not include markdown.
+- Do not include any text outside the JSON.
+"""
+
+    ai_response = generate_text(
+        prompt,
+        existing_questions,
+    )
+
     questions_data = json.loads(ai_response)
 
+    # =========================================================
+    # 4. SAVE QUESTIONS
+    # =========================================================
 
     for question in questions_data:
+
         new_question = Question(
             interview_id=interview.id,
             question_text=question["question_text"],
@@ -82,6 +133,10 @@ def create_interview(
         db.add(new_question)
 
     db.commit()
+
+    # =========================================================
+    # 5. RESPONSE
+    # =========================================================
 
     return {
         "id": str(interview.id),
