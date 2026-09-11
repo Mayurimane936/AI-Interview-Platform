@@ -9,7 +9,7 @@ import {
     startInterview,
     submitAnswer,
     evaluateAnswer,
-    completeInterview
+    completeInterview,
 } from "../api/interview";
 
 function Interview() {
@@ -28,10 +28,15 @@ function Interview() {
     const [loading, setLoading] = useState(true);
     const [starting, setStarting] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [retryingEvaluation, setRetryingEvaluation] =
+        useState(false);
 
     const [error, setError] = useState("");
+    const [evaluationError, setEvaluationError] =
+        useState("");
 
-    const [submittedAnswers, setSubmittedAnswers] = useState({});
+    const [submittedAnswers, setSubmittedAnswers] =
+        useState({});
 
     // =========================================================
     // LOAD INTERVIEW
@@ -54,8 +59,15 @@ function Interview() {
                         interviewId
                     );
 
-                console.log("INTERVIEW:", interviewData);
-                console.log("QUESTIONS:", questionData);
+                console.log(
+                    "INTERVIEW:",
+                    interviewData
+                );
+
+                console.log(
+                    "QUESTIONS:",
+                    questionData
+                );
 
                 setInterview(interviewData);
 
@@ -118,20 +130,27 @@ function Interview() {
     };
 
     // =========================================================
-    // SUBMIT ANSWER
+    // SUBMIT ANSWER + EVALUATE
     // =========================================================
 
     const handleSubmitAnswer = async () => {
         if (!answer.trim()) {
-            setError("Please enter an answer before submitting.");
+            setError(
+                "Please enter an answer before submitting."
+            );
             return;
         }
 
         try {
             setSubmitting(true);
             setError("");
+            setEvaluationError("");
 
-            // 1. Save the answer
+            // =================================================
+            // STEP 1
+            // Save answer
+            // =================================================
+
             const answerData = await submitAnswer(
                 token,
                 interviewId,
@@ -139,22 +158,82 @@ function Interview() {
                 answer.trim()
             );
 
-            // 2. Ask Gemini to evaluate the answer
-            const evaluationData = await evaluateAnswer(
-                token,
-                interviewId,
-                answerData.id
+            console.log(
+                "ANSWER SAVED:",
+                answerData
             );
 
-            // 3. Store both answer + evaluation
-            setSubmittedAnswers((prev) => ({
-                ...prev,
+            // =================================================
+            // STEP 2
+            // Mark answer as submitted immediately
+            // =================================================
+
+            setSubmittedAnswers((previous) => ({
+                ...previous,
                 [currentQuestion.id]: {
                     answer: answerData,
-                    evaluation: evaluationData,
+                    evaluation: null,
                 },
             }));
+
+            // =================================================
+            // STEP 3
+            // Evaluate answer
+            // =================================================
+
+            try {
+                const evaluationData =
+                    await evaluateAnswer(
+                        token,
+                        interviewId,
+                        answerData.id
+                    );
+
+                console.log(
+                    "ANSWER EVALUATED:",
+                    evaluationData
+                );
+
+                // =================================================
+                // STEP 4
+                // Save evaluation
+                // =================================================
+
+                setSubmittedAnswers((previous) => ({
+                    ...previous,
+                    [currentQuestion.id]: {
+                        answer: answerData,
+                        evaluation: evaluationData,
+                    },
+                }));
+            } catch (evaluationErr) {
+                console.error(
+                    "EVALUATION ERROR:",
+                    evaluationErr
+                );
+
+                /*
+                 * IMPORTANT:
+                 *
+                 * The answer has already been saved.
+                 *
+                 * We DO NOT call submitAnswer() again.
+                 *
+                 * The user can retry only the evaluation
+                 * using the existing answer ID.
+                 */
+
+                setEvaluationError(
+                    evaluationErr.message ||
+                    "Unable to evaluate your answer right now."
+                );
+            }
         } catch (err) {
+            console.error(
+                "ANSWER SUBMISSION ERROR:",
+                err
+            );
+
             setError(err.message);
         } finally {
             setSubmitting(false);
@@ -162,7 +241,68 @@ function Interview() {
     };
 
     // =========================================================
-    // NEXT QUESTION
+    // RETRY EVALUATION
+    // =========================================================
+
+    const handleRetryEvaluation = async () => {
+        const answerData =
+            submittedAnswers[
+                currentQuestion.id
+            ]?.answer;
+
+        if (!answerData?.id) {
+            setEvaluationError(
+                "Unable to find the saved answer."
+            );
+            return;
+        }
+
+        try {
+            setRetryingEvaluation(true);
+            setEvaluationError("");
+            setError("");
+
+            console.log(
+                "RETRYING EVALUATION FOR ANSWER:",
+                answerData.id
+            );
+
+            const evaluationData =
+                await evaluateAnswer(
+                    token,
+                    interviewId,
+                    answerData.id
+                );
+
+            console.log(
+                "RETRY EVALUATION SUCCESS:",
+                evaluationData
+            );
+
+            setSubmittedAnswers((previous) => ({
+                ...previous,
+                [currentQuestion.id]: {
+                    answer: answerData,
+                    evaluation: evaluationData,
+                },
+            }));
+        } catch (err) {
+            console.error(
+                "RETRY EVALUATION ERROR:",
+                err
+            );
+
+            setEvaluationError(
+                err.message ||
+                "Evaluation is still unavailable."
+            );
+        } finally {
+            setRetryingEvaluation(false);
+        }
+    };
+
+    // =========================================================
+    // NEXT QUESTION / COMPLETE INTERVIEW
     // =========================================================
 
     const handleNextQuestion = async () => {
@@ -173,8 +313,14 @@ function Interview() {
 
             setAnswer("");
             setError("");
+            setEvaluationError("");
+
             return;
         }
+
+        // =====================================================
+        // LAST QUESTION
+        // =====================================================
 
         try {
             setSubmitting(true);
@@ -185,9 +331,14 @@ function Interview() {
                 interviewId
             );
 
-            console.log("INTERVIEW COMPLETED:", data);
+            console.log(
+                "INTERVIEW COMPLETED:",
+                data
+            );
 
-            navigate(`/interview/${interviewId}/result`);
+            navigate(
+                `/interview/${interviewId}/result`
+            );
         } catch (err) {
             console.error(
                 "COMPLETE INTERVIEW ERROR:",
@@ -207,21 +358,20 @@ function Interview() {
     if (loading) {
         return (
             <div className="min-h-screen bg-[#0B1020] flex items-center justify-center">
-
                 <div className="text-center">
 
                     <div
                         className="
-              w-10
-              h-10
-              border-4
-              border-[#252F4A]
-              border-t-[#6366F1]
-              rounded-full
-              animate-spin
-              mx-auto
-              mb-5
-            "
+                            w-10
+                            h-10
+                            border-4
+                            border-[#252F4A]
+                            border-t-[#6366F1]
+                            rounded-full
+                            animate-spin
+                            mx-auto
+                            mb-5
+                        "
                     />
 
                     <p className="text-sm text-[#9CA3AF]">
@@ -229,7 +379,6 @@ function Interview() {
                     </p>
 
                 </div>
-
             </div>
         );
     }
@@ -244,31 +393,31 @@ function Interview() {
 
                 <div
                     className="
-            w-full
-            max-w-md
-            bg-[#11182B]
-            border
-            border-[#252F4A]
-            rounded-2xl
-            p-8
-            text-center
-          "
+                        w-full
+                        max-w-md
+                        bg-[#11182B]
+                        border
+                        border-[#252F4A]
+                        rounded-2xl
+                        p-8
+                        text-center
+                    "
                 >
 
                     <div
                         className="
-              w-12
-              h-12
-              rounded-full
-              bg-red-500/10
-              border
-              border-red-500/20
-              flex
-              items-center
-              justify-center
-              mx-auto
-              mb-5
-            "
+                            w-12
+                            h-12
+                            rounded-full
+                            bg-red-500/10
+                            border
+                            border-red-500/20
+                            flex
+                            items-center
+                            justify-center
+                            mx-auto
+                            mb-5
+                        "
                     >
                         <span className="text-red-400 text-xl">
                             !
@@ -288,16 +437,16 @@ function Interview() {
                             navigate("/dashboard")
                         }
                         className="
-              w-full
-              py-3
-              rounded-xl
-              bg-gradient-to-r
-              from-[#6366F1]
-              to-[#8B5CF6]
-              text-white
-              font-semibold
-              transition
-            "
+                            w-full
+                            py-3
+                            rounded-xl
+                            bg-gradient-to-r
+                            from-[#6366F1]
+                            to-[#8B5CF6]
+                            text-white
+                            font-semibold
+                            transition
+                        "
                     >
                         Back to Dashboard
                     </button>
@@ -322,9 +471,18 @@ function Interview() {
             ? (questionNumber / totalQuestions) * 100
             : 0;
 
+    const currentSubmission =
+        currentQuestion
+            ? submittedAnswers[
+                currentQuestion.id
+            ]
+            : null;
+
     const hasSubmitted =
-        currentQuestion &&
-        !!submittedAnswers[currentQuestion.id];
+        !!currentSubmission;
+
+    const hasEvaluation =
+        !!currentSubmission?.evaluation;
 
     // =========================================================
     // MAIN UI
@@ -334,21 +492,21 @@ function Interview() {
         <div className="min-h-screen bg-[#0B1020] text-[#E5E7EB]">
 
             {/* =====================================================
-          HEADER
-      ====================================================== */}
+                HEADER
+            ====================================================== */}
 
             <header className="bg-[#11182B] border-b border-[#252F4A]">
 
                 <div
                     className="
-            max-w-6xl
-            mx-auto
-            px-6
-            h-[76px]
-            flex
-            items-center
-            justify-between
-          "
+                        max-w-6xl
+                        mx-auto
+                        px-6
+                        h-[76px]
+                        flex
+                        items-center
+                        justify-between
+                    "
                 >
 
                     {/* BRAND */}
@@ -357,18 +515,18 @@ function Interview() {
 
                         <div
                             className="
-                w-10
-                h-10
-                rounded-xl
-                bg-gradient-to-br
-                from-[#6366F1]
-                to-[#8B5CF6]
-                flex
-                items-center
-                justify-center
-                shadow-lg
-                shadow-indigo-950/30
-              "
+                                w-10
+                                h-10
+                                rounded-xl
+                                bg-gradient-to-br
+                                from-[#6366F1]
+                                to-[#8B5CF6]
+                                flex
+                                items-center
+                                justify-center
+                                shadow-lg
+                                shadow-indigo-950/30
+                            "
                         >
                             <span className="text-white font-bold text-sm">
                                 AI
@@ -412,11 +570,11 @@ function Interview() {
                                 navigate("/dashboard")
                             }
                             className="
-                text-sm
-                text-[#9CA3AF]
-                hover:text-[#E5E7EB]
-                transition
-              "
+                                text-sm
+                                text-[#9CA3AF]
+                                hover:text-[#E5E7EB]
+                                transition
+                            "
                         >
                             Exit
                         </button>
@@ -429,8 +587,8 @@ function Interview() {
 
 
             {/* =====================================================
-          MAIN
-      ====================================================== */}
+                MAIN
+            ====================================================== */}
 
             <main className="max-w-4xl mx-auto px-6 py-10">
 
@@ -477,14 +635,14 @@ function Interview() {
 
                         <div
                             className="
-                h-full
-                rounded-full
-                bg-gradient-to-r
-                from-[#6366F1]
-                to-[#8B5CF6]
-                transition-all
-                duration-500
-              "
+                                h-full
+                                rounded-full
+                                bg-gradient-to-r
+                                from-[#6366F1]
+                                to-[#8B5CF6]
+                                transition-all
+                                duration-500
+                            "
                             style={{
                                 width: `${progress}%`,
                             }}
@@ -496,51 +654,46 @@ function Interview() {
 
 
                 {/* =====================================================
-            BEFORE INTERVIEW STARTS
-        ====================================================== */}
+                    BEFORE INTERVIEW STARTS
+                ====================================================== */}
 
                 {interview?.status === "created" && (
 
                     <div
                         className="
-              bg-[#11182B]
-              border
-              border-[#252F4A]
-              rounded-2xl
-              overflow-hidden
-            "
+                            bg-[#11182B]
+                            border
+                            border-[#252F4A]
+                            rounded-2xl
+                            overflow-hidden
+                        "
                     >
 
                         <div className="p-8 md:p-10">
-
-                            {/* START STATE */}
 
                             <div className="text-center max-w-xl mx-auto">
 
                                 <div
                                     className="
-                    w-16
-                    h-16
-                    mx-auto
-                    rounded-2xl
-                    bg-gradient-to-br
-                    from-[#252D52]
-                    to-[#30234D]
-                    border
-                    border-[#3A4168]
-                    flex
-                    items-center
-                    justify-center
-                    mb-6
-                  "
+                                        w-16
+                                        h-16
+                                        mx-auto
+                                        rounded-2xl
+                                        bg-gradient-to-br
+                                        from-[#252D52]
+                                        to-[#30234D]
+                                        border
+                                        border-[#3A4168]
+                                        flex
+                                        items-center
+                                        justify-center
+                                        mb-6
+                                    "
                                 >
-
                                     <span className="text-[#A78BFA] font-bold text-lg">
                                         AI
                                     </span>
-
                                 </div>
-
 
                                 <p className="text-xs uppercase tracking-widest text-[#6B7280] mb-3">
                                     {interview?.topic}
@@ -557,9 +710,6 @@ function Interview() {
                                     you're ready.
                                 </p>
 
-
-                                {/* Interview details */}
-
                                 <div className="grid grid-cols-2 gap-3 mt-7">
 
                                     <div className="bg-[#0B1020] border border-[#252F4A] rounded-xl p-4">
@@ -573,7 +723,6 @@ function Interview() {
                                         </p>
 
                                     </div>
-
 
                                     <div className="bg-[#0B1020] border border-[#252F4A] rounded-xl p-4">
 
@@ -589,32 +738,29 @@ function Interview() {
 
                                 </div>
 
-
-                                {/* Start Button */}
-
                                 <button
                                     onClick={handleStart}
                                     disabled={starting}
                                     className="
-                    w-full
-                    mt-7
-                    py-3.5
-                    rounded-xl
-                    bg-gradient-to-r
-                    from-[#6366F1]
-                    to-[#8B5CF6]
-                    hover:from-[#7073F5]
-                    hover:to-[#9568F8]
-                    disabled:opacity-50
-                    disabled:cursor-not-allowed
-                    text-white
-                    font-semibold
-                    text-sm
-                    shadow-lg
-                    shadow-indigo-950/20
-                    transition
-                    duration-200
-                  "
+                                        w-full
+                                        mt-7
+                                        py-3.5
+                                        rounded-xl
+                                        bg-gradient-to-r
+                                        from-[#6366F1]
+                                        to-[#8B5CF6]
+                                        hover:from-[#7073F5]
+                                        hover:to-[#9568F8]
+                                        disabled:opacity-50
+                                        disabled:cursor-not-allowed
+                                        text-white
+                                        font-semibold
+                                        text-sm
+                                        shadow-lg
+                                        shadow-indigo-950/20
+                                        transition
+                                        duration-200
+                                    "
                                 >
                                     {starting
                                         ? "Starting Interview..."
@@ -631,8 +777,8 @@ function Interview() {
 
 
                 {/* =====================================================
-            ACTIVE INTERVIEW
-        ====================================================== */}
+                    ACTIVE INTERVIEW
+                ====================================================== */}
 
                 {interview?.status === "in_progress" &&
                     currentQuestion && (
@@ -643,43 +789,43 @@ function Interview() {
 
                             <div
                                 className="
-                  bg-[#11182B]
-                  border
-                  border-[#252F4A]
-                  rounded-2xl
-                  overflow-hidden
-                  shadow-2xl
-                "
+                                    bg-[#11182B]
+                                    border
+                                    border-[#252F4A]
+                                    rounded-2xl
+                                    overflow-hidden
+                                    shadow-2xl
+                                "
                             >
 
                                 {/* Question Header */}
 
                                 <div
                                     className="
-                    px-7
-                    py-5
-                    border-b
-                    border-[#252F4A]
-                    flex
-                    items-center
-                    justify-between
-                  "
+                                        px-7
+                                        py-5
+                                        border-b
+                                        border-[#252F4A]
+                                        flex
+                                        items-center
+                                        justify-between
+                                    "
                                 >
 
                                     <div className="flex items-center gap-4">
 
                                         <div
                                             className="
-                        w-10
-                        h-10
-                        rounded-xl
-                        bg-[#1E2540]
-                        border
-                        border-[#343D63]
-                        flex
-                        items-center
-                        justify-center
-                      "
+                                                w-10
+                                                h-10
+                                                rounded-xl
+                                                bg-[#1E2540]
+                                                border
+                                                border-[#343D63]
+                                                flex
+                                                items-center
+                                                justify-center
+                                            "
                                         >
                                             <span className="text-[#A78BFA] text-sm font-semibold">
                                                 {String(
@@ -703,20 +849,19 @@ function Interview() {
 
                                     </div>
 
-
                                     <span
                                         className="
-                      px-3
-                      py-1.5
-                      rounded-full
-                      text-[11px]
-                      font-medium
-                      bg-[#1E2540]
-                      border
-                      border-[#343D63]
-                      text-[#A5A9E8]
-                      capitalize
-                    "
+                                            px-3
+                                            py-1.5
+                                            rounded-full
+                                            text-[11px]
+                                            font-medium
+                                            bg-[#1E2540]
+                                            border
+                                            border-[#343D63]
+                                            text-[#A5A9E8]
+                                            capitalize
+                                        "
                                     >
                                         {currentQuestion.difficulty ||
                                             interview?.difficulty}
@@ -738,8 +883,6 @@ function Interview() {
 
                                 {/* Answer section */}
 
-                                {/* Answer section */}
-
                                 <div className="px-7 pb-7">
 
                                     <label className="block text-sm font-medium text-[#AEB5C3] mb-3">
@@ -749,39 +892,43 @@ function Interview() {
                                     <textarea
                                         value={answer}
                                         onChange={(e) =>
-                                            setAnswer(e.target.value)
+                                            setAnswer(
+                                                e.target.value
+                                            )
                                         }
                                         disabled={hasSubmitted}
                                         placeholder="Explain your approach, reasoning, and answer..."
                                         className="
-          w-full
-          min-h-[220px]
-          resize-y
-          rounded-xl
-          bg-[#0B1020]
-          border
-          border-[#293452]
-          px-5
-          py-4
-          text-sm
-          leading-7
-          text-[#D8DCE5]
-          placeholder:text-[#50596B]
-          outline-none
-          focus:border-[#6366F1]
-          focus:ring-1
-          focus:ring-[#6366F1]/20
-          disabled:opacity-70
-          disabled:cursor-not-allowed
-          transition
-        "
+                                            w-full
+                                            min-h-[220px]
+                                            resize-y
+                                            rounded-xl
+                                            bg-[#0B1020]
+                                            border
+                                            border-[#293452]
+                                            px-5
+                                            py-4
+                                            text-sm
+                                            leading-7
+                                            text-[#D8DCE5]
+                                            placeholder:text-[#50596B]
+                                            outline-none
+                                            focus:border-[#6366F1]
+                                            focus:ring-1
+                                            focus:ring-[#6366F1]/20
+                                            disabled:opacity-70
+                                            disabled:cursor-not-allowed
+                                            transition
+                                        "
                                     />
 
                                     <div className="flex items-center justify-between mt-3">
 
                                         <p className="text-xs text-[#5E687A]">
                                             {hasSubmitted
-                                                ? "Answer submitted"
+                                                ? hasEvaluation
+                                                    ? "Answer evaluated"
+                                                    : "Answer submitted — evaluation pending"
                                                 : "Be clear and explain your reasoning."}
                                         </p>
 
@@ -793,10 +940,10 @@ function Interview() {
 
 
                                     {/* =====================================================
-        AI EVALUATION
-    ====================================================== */}
+                                        AI EVALUATION
+                                    ====================================================== */}
 
-                                    {hasSubmitted && (
+                                    {hasEvaluation && (
                                         <div className="mt-7">
 
                                             <div className="flex items-center justify-between mb-4">
@@ -815,17 +962,15 @@ function Interview() {
 
                                                     <p className="text-3xl font-bold text-[#A78BFA]">
                                                         {
-                                                            submittedAnswers[
-                                                                currentQuestion.id
-                                                            ]?.evaluation?.evaluation?.score ??
-                                                            submittedAnswers[
-                                                                currentQuestion.id
-                                                            ]?.evaluation?.score ??
+                                                            currentSubmission?.evaluation?.evaluation?.score ??
+                                                            currentSubmission?.evaluation?.score ??
                                                             "—"
                                                         }
+
                                                         <span className="text-base text-[#6B7280] font-medium">
                                                             /10
                                                         </span>
+
                                                     </p>
 
                                                 </div>
@@ -835,7 +980,7 @@ function Interview() {
 
                                             <div className="grid md:grid-cols-3 gap-3">
 
-                                                {/* Correctness */}
+                                                {/* CORRECTNESS */}
 
                                                 <div className="bg-[#0B1020] border border-[#252F4A] rounded-xl p-4">
 
@@ -845,12 +990,8 @@ function Interview() {
 
                                                     <p className="text-sm text-[#C7CBD5] leading-6 mt-3">
                                                         {
-                                                            submittedAnswers[
-                                                                currentQuestion.id
-                                                            ]?.evaluation?.evaluation?.correctness ??
-                                                            submittedAnswers[
-                                                                currentQuestion.id
-                                                            ]?.evaluation?.correctness ??
+                                                            currentSubmission?.evaluation?.evaluation?.correctness ??
+                                                            currentSubmission?.evaluation?.correctness ??
                                                             "No feedback available"
                                                         }
                                                     </p>
@@ -858,7 +999,7 @@ function Interview() {
                                                 </div>
 
 
-                                                {/* Relevance */}
+                                                {/* RELEVANCE */}
 
                                                 <div className="bg-[#0B1020] border border-[#252F4A] rounded-xl p-4">
 
@@ -868,12 +1009,8 @@ function Interview() {
 
                                                     <p className="text-sm text-[#C7CBD5] leading-6 mt-3">
                                                         {
-                                                            submittedAnswers[
-                                                                currentQuestion.id
-                                                            ]?.evaluation?.evaluation?.relevance ??
-                                                            submittedAnswers[
-                                                                currentQuestion.id
-                                                            ]?.evaluation?.relevance ??
+                                                            currentSubmission?.evaluation?.evaluation?.relevance ??
+                                                            currentSubmission?.evaluation?.relevance ??
                                                             "No feedback available"
                                                         }
                                                     </p>
@@ -881,7 +1018,7 @@ function Interview() {
                                                 </div>
 
 
-                                                {/* Clarity */}
+                                                {/* CLARITY */}
 
                                                 <div className="bg-[#0B1020] border border-[#252F4A] rounded-xl p-4">
 
@@ -891,12 +1028,8 @@ function Interview() {
 
                                                     <p className="text-sm text-[#C7CBD5] leading-6 mt-3">
                                                         {
-                                                            submittedAnswers[
-                                                                currentQuestion.id
-                                                            ]?.evaluation?.evaluation?.clarity ??
-                                                            submittedAnswers[
-                                                                currentQuestion.id
-                                                            ]?.evaluation?.clarity ??
+                                                            currentSubmission?.evaluation?.evaluation?.clarity ??
+                                                            currentSubmission?.evaluation?.clarity ??
                                                             "No feedback available"
                                                         }
                                                     </p>
@@ -906,7 +1039,7 @@ function Interview() {
                                             </div>
 
 
-                                            {/* Overall Feedback */}
+                                            {/* OVERALL FEEDBACK */}
 
                                             <div className="mt-3 bg-[#151D33] border border-[#252F4A] rounded-xl p-5">
 
@@ -916,12 +1049,8 @@ function Interview() {
 
                                                 <p className="text-sm text-[#C7CBD5] leading-7 mt-3">
                                                     {
-                                                        submittedAnswers[
-                                                            currentQuestion.id
-                                                        ]?.evaluation?.evaluation?.feedback ??
-                                                        submittedAnswers[
-                                                            currentQuestion.id
-                                                        ]?.evaluation?.feedback ??
+                                                        currentSubmission?.evaluation?.evaluation?.feedback ??
+                                                        currentSubmission?.evaluation?.feedback ??
                                                         "No feedback available"
                                                     }
                                                 </p>
@@ -931,23 +1060,120 @@ function Interview() {
                                         </div>
                                     )}
 
+
+                                    {/* =====================================================
+                                        EVALUATION FAILED
+                                    ====================================================== */}
+
+                                    {hasSubmitted &&
+                                        !hasEvaluation &&
+                                        evaluationError && (
+
+                                            <div
+                                                className="
+                                                    mt-7
+                                                    rounded-2xl
+                                                    border
+                                                    border-amber-500/20
+                                                    bg-amber-500/5
+                                                    p-5
+                                                "
+                                            >
+
+                                                <div className="flex items-start gap-4">
+
+                                                    <div
+                                                        className="
+                                                            w-10
+                                                            h-10
+                                                            rounded-xl
+                                                            bg-amber-500/10
+                                                            border
+                                                            border-amber-500/20
+                                                            flex
+                                                            items-center
+                                                            justify-center
+                                                            shrink-0
+                                                        "
+                                                    >
+                                                        <span className="text-amber-400 text-lg">
+                                                            !
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="flex-1">
+
+                                                        <p className="text-sm font-semibold text-[#E5E7EB]">
+                                                            Evaluation temporarily unavailable
+                                                        </p>
+
+                                                        <p className="text-sm text-[#AEB5C3] mt-2 leading-6">
+                                                            Your answer has been saved successfully.
+                                                            The AI evaluator could not process it right now.
+                                                            You can retry the evaluation without submitting
+                                                            your answer again.
+                                                        </p>
+
+                                                        <p className="text-xs text-amber-300/80 mt-3">
+                                                            {evaluationError}
+                                                        </p>
+
+                                                        <button
+                                                            onClick={
+                                                                handleRetryEvaluation
+                                                            }
+                                                            disabled={
+                                                                retryingEvaluation
+                                                            }
+                                                            className="
+                                                                mt-4
+                                                                px-5
+                                                                py-2.5
+                                                                rounded-xl
+                                                                bg-gradient-to-r
+                                                                from-[#6366F1]
+                                                                to-[#8B5CF6]
+                                                                hover:from-[#7073F5]
+                                                                hover:to-[#9568F8]
+                                                                disabled:opacity-50
+                                                                disabled:cursor-not-allowed
+                                                                text-white
+                                                                font-semibold
+                                                                text-sm
+                                                                transition
+                                                            "
+                                                        >
+                                                            {retryingEvaluation
+                                                                ? "Retrying Evaluation..."
+                                                                : "Retry Evaluation →"}
+                                                        </button>
+
+                                                    </div>
+
+                                                </div>
+
+                                            </div>
+                                        )}
+
                                 </div>
 
 
-                                {/* Submit / Continue */}
+                                {/* =====================================================
+                                    SUBMIT / CONTINUE
+                                ====================================================== */}
 
                                 <div
                                     className="
-                    px-7
-                    py-5
-                    border-t
-                    border-[#252F4A]
-                    bg-[#0E1424]
-                    flex
-                    items-center
-                    justify-between
-                    gap-4
-                  "
+                                        px-7
+                                        py-5
+                                        border-t
+                                        border-[#252F4A]
+                                        bg-[#0E1424]
+                                        flex
+                                        items-center
+                                        justify-between
+                                        gap-4
+                                    "
                                 >
 
                                     <div>
@@ -958,9 +1184,14 @@ function Interview() {
                                         </p>
 
                                         <p className="text-sm text-[#9CA3AF] mt-1">
-                                            {hasSubmitted
-                                                ? "Ready for the next question"
-                                                : "Submit your answer when ready"}
+                                            {!hasSubmitted
+                                                ? "Submit your answer when ready"
+                                                : !hasEvaluation
+                                                    ? "Evaluation pending"
+                                                    : currentQuestionIndex ===
+                                                        totalQuestions - 1
+                                                        ? "Interview ready to finish"
+                                                        : "Ready for the next question"}
                                         </p>
 
                                     </div>
@@ -977,27 +1208,58 @@ function Interview() {
                                                 !answer.trim()
                                             }
                                             className="
-                        px-6
-                        py-3
-                        rounded-xl
-                        bg-gradient-to-r
-                        from-[#6366F1]
-                        to-[#8B5CF6]
-                        hover:from-[#7073F5]
-                        hover:to-[#9568F8]
-                        disabled:opacity-40
-                        disabled:cursor-not-allowed
-                        text-white
-                        font-semibold
-                        text-sm
-                        shadow-lg
-                        shadow-indigo-950/20
-                        transition
-                      "
+                                                px-6
+                                                py-3
+                                                rounded-xl
+                                                bg-gradient-to-r
+                                                from-[#6366F1]
+                                                to-[#8B5CF6]
+                                                hover:from-[#7073F5]
+                                                hover:to-[#9568F8]
+                                                disabled:opacity-40
+                                                disabled:cursor-not-allowed
+                                                text-white
+                                                font-semibold
+                                                text-sm
+                                                shadow-lg
+                                                shadow-indigo-950/20
+                                                transition
+                                            "
                                         >
                                             {submitting
-                                                ? "Submitting..."
+                                                ? "Submitting & Evaluating..."
                                                 : "Submit Answer →"}
+                                        </button>
+
+                                    ) : !hasEvaluation ? (
+
+                                        <button
+                                            onClick={
+                                                handleRetryEvaluation
+                                            }
+                                            disabled={
+                                                retryingEvaluation
+                                            }
+                                            className="
+                                                px-6
+                                                py-3
+                                                rounded-xl
+                                                bg-gradient-to-r
+                                                from-[#6366F1]
+                                                to-[#8B5CF6]
+                                                hover:from-[#7073F5]
+                                                hover:to-[#9568F8]
+                                                disabled:opacity-40
+                                                disabled:cursor-not-allowed
+                                                text-white
+                                                font-semibold
+                                                text-sm
+                                                transition
+                                            "
+                                        >
+                                            {retryingEvaluation
+                                                ? "Retrying..."
+                                                : "Retry Evaluation →"}
                                         </button>
 
                                     ) : (
@@ -1006,27 +1268,29 @@ function Interview() {
                                             onClick={
                                                 handleNextQuestion
                                             }
-                                            disabled={submitting}
+                                            disabled={
+                                                submitting
+                                            }
                                             className="
-                        px-6
-                        py-3
-                        rounded-xl
-                        bg-gradient-to-r
-                        from-[#6366F1]
-                        to-[#8B5CF6]
-                        hover:from-[#7073F5]
-                        hover:to-[#9568F8]
-                        disabled:opacity-40
-                        disabled:cursor-not-allowed
-                        text-white
-                        font-semibold
-                        text-sm
-                        transition
-                      "
+                                                px-6
+                                                py-3
+                                                rounded-xl
+                                                bg-gradient-to-r
+                                                from-[#6366F1]
+                                                to-[#8B5CF6]
+                                                hover:from-[#7073F5]
+                                                hover:to-[#9568F8]
+                                                disabled:opacity-40
+                                                disabled:cursor-not-allowed
+                                                text-white
+                                                font-semibold
+                                                text-sm
+                                                transition
+                                            "
                                         >
                                             {currentQuestionIndex ===
                                                 totalQuestions - 1
-                                                ? "All Questions Completed"
+                                                ? "Finish Interview →"
                                                 : "Next Question →"}
                                         </button>
 
@@ -1037,20 +1301,22 @@ function Interview() {
                             </div>
 
 
-                            {/* Error below active interview */}
+                            {/* =====================================================
+                                GENERAL ERROR
+                            ====================================================== */}
 
                             {error && (
 
                                 <div
                                     className="
-                    mt-4
-                    rounded-xl
-                    border
-                    border-red-500/20
-                    bg-red-500/5
-                    px-4
-                    py-3
-                  "
+                                        mt-4
+                                        rounded-xl
+                                        border
+                                        border-red-500/20
+                                        bg-red-500/5
+                                        px-4
+                                        py-3
+                                    "
                                 >
 
                                     <p className="text-sm text-red-400">
@@ -1066,6 +1332,163 @@ function Interview() {
                     )}
 
             </main>
+
+
+            {/* =========================================================
+                QUOTA / EVALUATION POPUP
+            ========================================================== */}
+
+            {hasSubmitted &&
+                !hasEvaluation &&
+                evaluationError && (
+
+                    <div
+                        className="
+                            fixed
+                            inset-0
+                            z-50
+                            flex
+                            items-center
+                            justify-center
+                            px-6
+                            bg-black/60
+                            backdrop-blur-sm
+                        "
+                    >
+
+                        <div
+                            className="
+                                w-full
+                                max-w-md
+                                bg-[#11182B]
+                                border
+                                border-[#252F4A]
+                                rounded-2xl
+                                shadow-2xl
+                                p-7
+                            "
+                        >
+
+                            <div className="flex items-start gap-4">
+
+                                <div
+                                    className="
+                                        w-12
+                                        h-12
+                                        rounded-xl
+                                        bg-amber-500/10
+                                        border
+                                        border-amber-500/20
+                                        flex
+                                        items-center
+                                        justify-center
+                                        shrink-0
+                                    "
+                                >
+                                    <span className="text-amber-400 text-xl">
+                                        !
+                                    </span>
+                                </div>
+
+                                <div>
+
+                                    <h3 className="text-lg font-semibold text-[#E5E7EB]">
+                                        AI Evaluation Unavailable
+                                    </h3>
+
+                                    <p className="text-sm text-[#9CA3AF] mt-2 leading-6">
+                                        Your answer has already been saved.
+                                        The AI evaluator is temporarily
+                                        unavailable, possibly because of
+                                        a model quota or rate limit.
+                                    </p>
+
+                                </div>
+
+                            </div>
+
+
+                            <div
+                                className="
+                                    mt-5
+                                    rounded-xl
+                                    bg-[#0B1020]
+                                    border
+                                    border-[#252F4A]
+                                    p-4
+                                "
+                            >
+
+                                <p className="text-xs uppercase tracking-widest text-[#6B7280]">
+                                    What you can do
+                                </p>
+
+                                <p className="text-sm text-[#C7CBD5] mt-2 leading-6">
+                                    Retry the AI evaluation. Your answer
+                                    will not be submitted again.
+                                </p>
+
+                            </div>
+
+
+                            <div className="flex justify-end gap-3 mt-6">
+
+                                <button
+                                    onClick={() =>
+                                        setEvaluationError("")
+                                    }
+                                    className="
+                                        px-5
+                                        py-2.5
+                                        rounded-xl
+                                        border
+                                        border-[#293452]
+                                        text-[#9CA3AF]
+                                        hover:text-[#E5E7EB]
+                                        hover:bg-[#151D33]
+                                        text-sm
+                                        font-medium
+                                        transition
+                                    "
+                                >
+                                    Close
+                                </button>
+
+                                <button
+                                    onClick={
+                                        handleRetryEvaluation
+                                    }
+                                    disabled={
+                                        retryingEvaluation
+                                    }
+                                    className="
+                                        px-5
+                                        py-2.5
+                                        rounded-xl
+                                        bg-gradient-to-r
+                                        from-[#6366F1]
+                                        to-[#8B5CF6]
+                                        hover:from-[#7073F5]
+                                        hover:to-[#9568F8]
+                                        disabled:opacity-50
+                                        disabled:cursor-not-allowed
+                                        text-white
+                                        font-semibold
+                                        text-sm
+                                        transition
+                                    "
+                                >
+                                    {retryingEvaluation
+                                        ? "Retrying..."
+                                        : "Retry Evaluation"}
+                                </button>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+                )}
 
         </div>
     );
