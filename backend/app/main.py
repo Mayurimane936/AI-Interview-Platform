@@ -11,6 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from app.api.analytics import router as analytics_router
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.dashboard import router as dashboard_router
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -71,6 +72,13 @@ app.include_router(
     prefix="/analytics",
     tags=["Analytics"],
 )
+
+app.include_router(
+    dashboard_router,    
+    prefix="/dashboard",
+    tags=["Dashboard"],
+)
+
 
 @app.get("/")
 def root():

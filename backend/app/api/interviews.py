@@ -7,7 +7,7 @@ from app.schemas.evaluation import EvaluationCreate
 from app.models.evaluation import Evaluation
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.interview import Interview
+from app.models.interview import Interview, BulkDeleteInterviewsRequest
 from app.schemas.interview import InterviewCreate
 from app.schemas.interview import (
     InterviewResult,
@@ -21,6 +21,7 @@ from datetime import datetime
 from sqlalchemy import func
 
 router = APIRouter()
+
 
 
 @router.post("")
@@ -581,3 +582,220 @@ def get_interview_result(
         average_score=round(average_score, 2),
         questions=results,
     )
+
+
+
+
+@router.delete("/bulk")
+def delete_interviews_bulk(
+    request: BulkDeleteInterviewsRequest,
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not request.interview_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="No interviews selected",
+        )
+
+    try:
+        # =====================================================
+        # 1. Find only interviews owned by current user
+        # =====================================================
+
+        interviews = (
+            db.query(Interview)
+            .filter(
+                Interview.id.in_(request.interview_ids),
+                Interview.user_id == user_id,
+            )
+            .all()
+        )
+
+        if not interviews:
+            raise HTTPException(
+                status_code=404,
+                detail="No matching interviews found",
+            )
+
+        interview_ids = [
+            interview.id
+            for interview in interviews
+        ]
+
+        # =====================================================
+        # 2. Get answers
+        # =====================================================
+
+        answers = (
+            db.query(Answer)
+            .filter(
+                Answer.interview_id.in_(
+                    interview_ids
+                )
+            )
+            .all()
+        )
+
+        answer_ids = [
+            answer.id
+            for answer in answers
+        ]
+
+        # =====================================================
+        # 3. Delete evaluations
+        # =====================================================
+
+        if answer_ids:
+            db.query(Evaluation).filter(
+                Evaluation.answer_id.in_(answer_ids)
+            ).delete(
+                synchronize_session=False
+            )
+
+        # =====================================================
+        # 4. Delete answers
+        # =====================================================
+
+        if interview_ids:
+            db.query(Answer).filter(
+                Answer.interview_id.in_(interview_ids)
+            ).delete(
+                synchronize_session=False
+            )
+
+        # =====================================================
+        # 5. Delete questions
+        # =====================================================
+
+        db.query(Question).filter(
+            Question.interview_id.in_(interview_ids)
+        ).delete(
+            synchronize_session=False
+        )
+
+        # =====================================================
+        # 6. Delete interviews
+        # =====================================================
+
+        db.query(Interview).filter(
+            Interview.id.in_(interview_ids)
+        ).delete(
+            synchronize_session=False
+        )
+
+        db.commit()
+
+        return {
+            "message": "Interviews deleted successfully",
+            "deleted_count": len(interview_ids),
+            "deleted_interview_ids": [
+                str(interview_id)
+                for interview_id in interview_ids
+            ],
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete interviews",
+        )
+
+
+
+@router.delete("/{interview_id}")
+def delete_interview(
+    interview_id: str,
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # =========================================================
+    # 1. Find interview and verify ownership
+    # =========================================================
+
+    interview = (
+        db.query(Interview)
+        .filter(
+            Interview.id == interview_id,
+            Interview.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not interview:
+        raise HTTPException(
+            status_code=404,
+            detail="Interview not found",
+        )
+
+    try:
+        # =====================================================
+        # 2. Find answers belonging to this interview
+        # =====================================================
+
+        answers = (
+            db.query(Answer)
+            .filter(
+                Answer.interview_id == interview_id
+            )
+            .all()
+        )
+
+        # =====================================================
+        # 3. Delete evaluations first
+        # =====================================================
+
+        for answer in answers:
+            db.query(Evaluation).filter(
+                Evaluation.answer_id == answer.id
+            ).delete(
+                synchronize_session=False
+            )
+
+        # =====================================================
+        # 4. Delete answers
+        # =====================================================
+
+        db.query(Answer).filter(
+            Answer.interview_id == interview_id
+        ).delete(
+            synchronize_session=False
+        )
+
+        # =====================================================
+        # 5. Delete questions
+        # =====================================================
+
+        db.query(Question).filter(
+            Question.interview_id == interview_id
+        ).delete(
+            synchronize_session=False
+        )
+
+        # =====================================================
+        # 6. Delete interview
+        # =====================================================
+
+        db.delete(interview)
+
+        db.commit()
+
+        return {
+            "message": "Interview deleted successfully",
+            "interview_id": interview_id,
+        }
+
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete interview",
+        )
+

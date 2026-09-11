@@ -1,11 +1,13 @@
 import uuid
 from datetime import datetime
-
+from pydantic import BaseModel
 from sqlalchemy import Column, String, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.database import Base
 
+class BulkDeleteInterviewsRequest(BaseModel):
+    interview_ids: list[str]
 
 class Interview(Base):
     __tablename__ = "interviews"
