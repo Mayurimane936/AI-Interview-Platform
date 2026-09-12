@@ -19,8 +19,60 @@ from app.services.gemini import generate_text, evaluate_answer
 import json
 from datetime import datetime
 from sqlalchemy import func
+from fastapi import Query
+from app.data.technical_topics import (
+    get_all_categories,
+    get_topics_for_category,
+    search_topics,
+    normalize_category,
+)
 
 router = APIRouter()
+
+
+# =========================================================
+# TECHNICAL CATEGORIES
+# =========================================================
+
+@router.get("/categories")
+def get_interview_categories():
+    return {
+        "categories": get_all_categories()
+    }
+
+
+# =========================================================
+# TECHNICAL TOPICS
+# =========================================================
+
+@router.get("/topics")
+def get_interview_topics(
+    category: str = Query(...),
+    search: str | None = Query(default=None),
+):
+    normalized_category = normalize_category(category)
+
+    if not normalized_category:
+        raise HTTPException(
+            status_code=404,
+            detail="Technical category not found",
+        )
+
+    if search and search.strip():
+        topics = search_topics(
+            search,
+            normalized_category,
+        )
+    else:
+        topics = get_topics_for_category(
+            normalized_category
+        )
+
+    return {
+        "category": normalized_category,
+        "topics": topics,
+    }
+
 
 
 @router.post("")

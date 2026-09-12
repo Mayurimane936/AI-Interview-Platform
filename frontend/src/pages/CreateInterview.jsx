@@ -7,106 +7,50 @@ import {
 import { createInterview } from "../api/interview";
 import { useAuth } from "../context/AuthContext";
 
+const API_URL = "http://127.0.0.1:8000";
+
 function CreateInterview() {
     const navigate = useNavigate();
-    const { token } = useAuth();
+    const { token, logout } = useAuth();
     const [searchParams] = useSearchParams();
 
-    const categoryFromUrl = searchParams.get("category");
+    const categoryFromUrl =
+        searchParams.get("category");
 
     // ==========================================
-    // CATEGORY OPTIONS
+    // CATEGORY STATE
     // ==========================================
 
-    const categoryOptions = {
-        dsa: {
-            label: "Data Structures",
-            shortLabel: "DSA",
-            description:
-                "Algorithms and core data structures",
-            topics: [
-                "Arrays & Strings",
-                "Linked Lists",
-                "Stacks & Queues",
-                "Trees",
-                "Binary Search Trees",
-                "Heaps",
-                "Hash Tables",
-                "Graphs",
-                "Dynamic Programming",
-                "Sorting & Searching",
-            ],
-        },
+    const [categories, setCategories] =
+        useState([]);
 
-        backend: {
-            label: "Backend",
-            shortLabel: "Backend",
-            description:
-                "APIs, databases and backend engineering",
-            topics: [
-                "REST APIs",
-                "FastAPI",
-                "Node.js",
-                "Databases",
-                "SQL",
-                "Redis",
-                "Caching",
-                "Authentication",
-                "Microservices",
-                "Distributed Systems",
-                "Message Queues",
-            ],
-        },
-
-        system_design: {
-            label: "System Design",
-            shortLabel: "System Design",
-            description:
-                "Scalable systems and architecture",
-            topics: [
-                "URL Shortener",
-                "Chat Application",
-                "Rate Limiter",
-                "Notification System",
-                "File Storage",
-                "Food Delivery",
-                "Video Streaming",
-                "Social Media Feed",
-                "Payment System",
-                "Distributed Cache",
-            ],
-        },
-    };
-
-    // ==========================================
-    // STATE
-    // ==========================================
-
-    const validCategory =
-        categoryFromUrl &&
-            categoryOptions[categoryFromUrl]
-            ? categoryFromUrl
-            : "";
-
-    const [mode, setMode] = useState(
-        validCategory ? "quick" : "custom"
-    );
+    const [categoriesLoading, setCategoriesLoading] =
+        useState(true);
 
     const [category, setCategory] =
-        useState(validCategory);
+        useState("");
 
-    const [topic, setTopic] = useState(() => {
-        if (
-            validCategory &&
-            categoryOptions[validCategory]
-        ) {
-            return categoryOptions[
-                validCategory
-            ].topics[0];
-        }
+    // ==========================================
+    // TOPIC STATE
+    // ==========================================
 
-        return "";
-    });
+    const [topics, setTopics] = useState([]);
+
+    const [topic, setTopic] =
+        useState("");
+
+    const [topicSearch, setTopicSearch] =
+        useState("");
+
+    const [topicsLoading, setTopicsLoading] =
+        useState(false);
+
+    const [showTopicResults, setShowTopicResults] =
+        useState(false);
+
+    // ==========================================
+    // OTHER STATE
+    // ==========================================
 
     const [difficulty, setDifficulty] =
         useState("medium");
@@ -114,26 +58,166 @@ function CreateInterview() {
     const [loading, setLoading] =
         useState(false);
 
-    const [error, setError] = useState("");
+    const [error, setError] =
+        useState("");
 
     // ==========================================
-    // HANDLE URL CATEGORY
+    // LOAD CATEGORIES
     // ==========================================
 
     useEffect(() => {
-        if (
-            categoryFromUrl &&
-            categoryOptions[categoryFromUrl]
-        ) {
-            const selectedCategory =
-                categoryOptions[categoryFromUrl];
+        const loadCategories = async () => {
+            try {
+                setCategoriesLoading(true);
 
-            setMode("quick");
-            setCategory(categoryFromUrl);
-            setTopic(selectedCategory.topics[0]);
-            setError("");
+                const response = await fetch(
+                    `${API_URL}/interviews/categories`
+                );
+
+                const data =
+                    await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.detail ||
+                        "Failed to load categories"
+                    );
+                }
+
+                setCategories(
+                    data.categories || []
+                );
+            } catch (err) {
+                console.error(
+                    "CATEGORY LOAD ERROR:",
+                    err
+                );
+
+                setError(
+                    err.message ||
+                    "Failed to load interview categories."
+                );
+            } finally {
+                setCategoriesLoading(false);
+            }
+        };
+
+        loadCategories();
+    }, []);
+
+    // ==========================================
+    // SET CATEGORY FROM URL
+    // ==========================================
+
+    useEffect(() => {
+        if (!categories.length) {
+            return;
         }
-    }, [categoryFromUrl]);
+
+        const categoryExists =
+            categories.some(
+                (item) =>
+                    item.value === categoryFromUrl
+            );
+
+        if (categoryExists) {
+            setCategory(categoryFromUrl);
+        } else {
+            setCategory("");
+        }
+    }, [
+        categories,
+        categoryFromUrl,
+    ]);
+
+    // ==========================================
+    // LOAD TOPICS ONLY AFTER USER TYPES
+    // ==========================================
+
+    useEffect(() => {
+        if (!category) {
+            setTopics([]);
+            setTopicsLoading(false);
+            setShowTopicResults(false);
+            return;
+        }
+
+        const searchValue =
+            topicSearch.trim();
+
+        // Do NOT show all topics when search is empty.
+        if (!searchValue) {
+            setTopics([]);
+            setTopicsLoading(false);
+            setShowTopicResults(false);
+            return;
+        }
+
+        const timeoutId =
+            setTimeout(async () => {
+                try {
+                    setTopicsLoading(true);
+                    setError("");
+
+                    const params =
+                        new URLSearchParams();
+
+                    params.set(
+                        "category",
+                        category
+                    );
+
+                    params.set(
+                        "search",
+                        searchValue
+                    );
+
+                    const response =
+                        await fetch(
+                            `${API_URL}/interviews/topics?${params.toString()}`
+                        );
+
+                    const data =
+                        await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(
+                            data.detail ||
+                            "Failed to load topics"
+                        );
+                    }
+
+                    setTopics(
+                        data.topics || []
+                    );
+
+                    setShowTopicResults(
+                        true
+                    );
+                } catch (err) {
+                    console.error(
+                        "TOPIC LOAD ERROR:",
+                        err
+                    );
+
+                    setError(
+                        err.message ||
+                        "Failed to load topics."
+                    );
+
+                    setTopics([]);
+                    setShowTopicResults(true);
+                } finally {
+                    setTopicsLoading(false);
+                }
+            }, 300);
+
+        return () =>
+            clearTimeout(timeoutId);
+    }, [
+        category,
+        topicSearch,
+    ]);
 
     // ==========================================
     // CATEGORY SELECT
@@ -142,33 +226,44 @@ function CreateInterview() {
     const handleCategorySelect = (
         selectedCategory
     ) => {
-        const selected =
-            categoryOptions[selectedCategory];
+        setCategory(
+            selectedCategory
+        );
 
-        setMode("quick");
-        setCategory(selectedCategory);
-        setTopic(selected.topics[0]);
+        setTopic("");
+        setTopicSearch("");
+        setTopics([]);
+        setShowTopicResults(false);
         setError("");
 
-        navigate(
-            `/create-interview?category=${selectedCategory}`,
-            { replace: true }
-        );
+        if (selectedCategory) {
+            navigate(
+                `/create-interview?category=${selectedCategory}`,
+                {
+                    replace: true,
+                }
+            );
+        } else {
+            navigate(
+                "/create-interview",
+                {
+                    replace: true,
+                }
+            );
+        }
     };
 
     // ==========================================
-    // CUSTOM SELECT
+    // TOPIC SELECT
     // ==========================================
 
-    const handleCustomSelect = () => {
-        setMode("custom");
-        setCategory("");
-        setTopic("");
+    const handleTopicSelect = (
+        selectedTopic
+    ) => {
+        setTopic(selectedTopic);
+        setTopicSearch(selectedTopic);
+        setShowTopicResults(false);
         setError("");
-
-        navigate("/create-interview", {
-            replace: true,
-        });
     };
 
     // ==========================================
@@ -180,9 +275,16 @@ function CreateInterview() {
 
         setError("");
 
+        if (!category) {
+            setError(
+                "Please select an interview category."
+            );
+            return;
+        }
+
         if (!topic.trim()) {
             setError(
-                "Please select or enter an interview topic."
+                "Please select a topic from the search results."
             );
             return;
         }
@@ -197,17 +299,24 @@ function CreateInterview() {
         setLoading(true);
 
         try {
-            const data = await createInterview(token, {
-                topic: topic.trim(),
-                difficulty,
-            });
+            const data =
+                await createInterview(
+                    token,
+                    {
+                        topic: topic.trim(),
+                        difficulty,
+                    },
+                    logout
+                );
 
             console.log(
                 "INTERVIEW CREATED:",
                 data
             );
 
-            navigate(`/interview/${data.id}`);
+            navigate(
+                `/interview/${data.id}`
+            );
         } catch (err) {
             console.error(
                 "CREATE INTERVIEW ERROR:",
@@ -234,14 +343,12 @@ function CreateInterview() {
             description:
                 "Fundamental concepts",
         },
-
         {
             value: "medium",
             label: "Medium",
             description:
                 "Interview-level questions",
         },
-
         {
             value: "hard",
             label: "Hard",
@@ -255,9 +362,30 @@ function CreateInterview() {
     // ==========================================
 
     const currentCategory =
-        category
-            ? categoryOptions[category]
-            : null;
+        categories.find(
+            (item) =>
+                item.value === category
+        );
+
+    // ==========================================
+    // QUICK PRACTICE CATEGORIES
+    // ==========================================
+
+    const quickPracticeKeys = [
+        "dsa",
+        "backend",
+        "system_design",
+    ];
+
+    const quickPracticeCategories =
+        quickPracticeKeys
+            .map((key) =>
+                categories.find(
+                    (item) =>
+                        item.value === key
+                )
+            )
+            .filter(Boolean);
 
     // ==========================================
     // UI
@@ -267,14 +395,12 @@ function CreateInterview() {
         <div className="min-h-screen bg-[#0B1020] text-[#E5E7EB]">
 
             {/* ==========================================
-          HEADER
-      ========================================== */}
+                HEADER
+            ========================================== */}
 
             <header className="bg-[#11182B] border-b border-[#252F4A]">
 
                 <div className="max-w-7xl mx-auto px-6 h-[76px] flex items-center justify-between">
-
-                    {/* BRAND */}
 
                     <button
                         type="button"
@@ -286,18 +412,18 @@ function CreateInterview() {
 
                         <div
                             className="
-                w-10
-                h-10
-                rounded-xl
-                bg-gradient-to-br
-                from-[#6366F1]
-                to-[#8B5CF6]
-                flex
-                items-center
-                justify-center
-                shadow-lg
-                shadow-indigo-950/30
-              "
+                                w-10
+                                h-10
+                                rounded-xl
+                                bg-gradient-to-br
+                                from-[#6366F1]
+                                to-[#8B5CF6]
+                                flex
+                                items-center
+                                justify-center
+                                shadow-lg
+                                shadow-indigo-950/30
+                            "
                         >
                             <span className="text-white font-bold text-sm">
                                 AI
@@ -318,20 +444,17 @@ function CreateInterview() {
 
                     </button>
 
-
-                    {/* DASHBOARD */}
-
                     <button
                         type="button"
                         onClick={() =>
                             navigate("/dashboard")
                         }
                         className="
-              text-sm
-              text-[#9CA3AF]
-              hover:text-[#E5E7EB]
-              transition
-            "
+                            text-sm
+                            text-[#9CA3AF]
+                            hover:text-[#E5E7EB]
+                            transition
+                        "
                     >
                         ← Dashboard
                     </button>
@@ -340,10 +463,9 @@ function CreateInterview() {
 
             </header>
 
-
             {/* ==========================================
-          MAIN
-      ========================================== */}
+                MAIN
+            ========================================== */}
 
             <main className="max-w-5xl mx-auto px-6 py-12">
 
@@ -357,10 +479,10 @@ function CreateInterview() {
                             navigate("/dashboard")
                         }
                         className="
-              text-[#687184]
-              hover:text-[#A5A9E8]
-              transition
-            "
+                            text-[#687184]
+                            hover:text-[#A5A9E8]
+                            transition
+                        "
                     >
                         Dashboard
                     </button>
@@ -375,7 +497,6 @@ function CreateInterview() {
 
                 </div>
 
-
                 {/* PAGE TITLE */}
 
                 <div className="mb-10">
@@ -385,20 +506,18 @@ function CreateInterview() {
                     </h2>
 
                     <p className="text-[#81899A] mt-3 max-w-2xl leading-7">
-                        Choose a practice area or create a
-                        completely custom interview tailored
-                        to what you want to learn.
+                        Choose a technical area, search
+                        for a topic, and let AI generate
+                        your interview.
                     </p>
 
                 </div>
 
-
                 {/* ==========================================
-            QUICK PRACTICE
-        ========================================== */}
+                    QUICK PRACTICE
+                ========================================== */}
 
-                {!validCategory && (
-
+                {!category && (
                     <section className="mb-8">
 
                         <div className="mb-4">
@@ -408,549 +527,706 @@ function CreateInterview() {
                             </h3>
 
                             <p className="text-sm text-[#70798B] mt-1">
-                                Start with a predefined interview category.
+                                Start with one of the most common interview areas.
                             </p>
 
                         </div>
 
-
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-                            {Object.entries(
-                                categoryOptions
-                            ).map(([key, item]) => {
+                            {quickPracticeCategories.map(
+                                (item) => {
 
-                                const selected =
-                                    mode === "quick" &&
-                                    category === key;
+                                    const initials =
+                                        item.label
+                                            .split(" ")
+                                            .map(
+                                                (word) =>
+                                                    word[0]
+                                            )
+                                            .join("")
+                                            .slice(
+                                                0,
+                                                2
+                                            )
+                                            .toUpperCase();
 
-                                return (
-                                    <button
-                                        key={key}
-                                        type="button"
-                                        onClick={() =>
-                                            handleCategorySelect(key)
-                                        }
-                                        className={`
-                      text-left
-                      rounded-2xl
-                      border
-                      p-6
-                      transition
-                      duration-200
-                      ${selected
-                                                ? "border-[#6366F1] bg-[#181F39] shadow-lg shadow-indigo-950/10"
-                                                : "border-[#252F4A] bg-[#11182B] hover:border-[#3B4770] hover:bg-[#141C32]"
+                                    return (
+                                        <button
+                                            key={
+                                                item.value
                                             }
-                    `}
-                                    >
+                                            type="button"
+                                            onClick={() =>
+                                                handleCategorySelect(
+                                                    item.value
+                                                )
+                                            }
+                                            className="
+                                                text-left
+                                                rounded-2xl
+                                                border
+                                                border-[#252F4A]
+                                                bg-[#11182B]
+                                                p-6
+                                                hover:border-[#3B4770]
+                                                hover:bg-[#141C32]
+                                                transition
+                                            "
+                                        >
 
-                                        <div className="flex items-center justify-between mb-5">
+                                            <div className="flex items-center justify-between mb-5">
 
-                                            <div
-                                                className={`
-                          w-11
-                          h-11
-                          rounded-xl
-                          flex
-                          items-center
-                          justify-center
-                          border
-                          ${selected
-                                                        ? "bg-[#292F55] border-[#454D80]"
-                                                        : "bg-[#1A2138] border-[#2B3554]"
-                                                    }
-                        `}
-                                            >
-
-                                                <span
-                                                    className={`
-                            text-xs font-bold
-                            ${selected
-                                                            ? "text-[#C4B5FD]"
-                                                            : "text-[#9CA3AF]"
-                                                        }
-                          `}
+                                                <div
+                                                    className="
+                                                        w-11
+                                                        h-11
+                                                        rounded-xl
+                                                        bg-[#1A2138]
+                                                        border
+                                                        border-[#2B3554]
+                                                        flex
+                                                        items-center
+                                                        justify-center
+                                                    "
                                                 >
-                                                    {key === "dsa"
-                                                        ? "DS"
-                                                        : key === "backend"
-                                                            ? "BE"
-                                                            : "SD"}
+                                                    <span className="text-[#A78BFA] font-bold text-xs">
+                                                        {initials}
+                                                    </span>
+                                                </div>
+
+                                                <span className="text-[#4B5563] text-lg">
+                                                    →
                                                 </span>
 
                                             </div>
 
+                                            <h4 className="text-base font-semibold text-[#D8DCE5]">
+                                                {
+                                                    item.label
+                                                }
+                                            </h4>
 
-                                            <span
-                                                className={`
-                          text-lg
-                          transition
-                          ${selected
-                                                        ? "text-[#A78BFA]"
-                                                        : "text-[#4B5563]"
-                                                    }
-                        `}
-                                            >
-                                                →
-                                            </span>
-
-                                        </div>
-
-
-                                        <h4 className="text-base font-semibold text-[#D8DCE5]">
-                                            {item.label}
-                                        </h4>
-
-                                        <p className="text-sm text-[#737C8E] mt-2 leading-6">
-                                            {item.description}
-                                        </p>
-
-                                    </button>
-                                );
-                            })}
+                                        </button>
+                                    );
+                                }
+                            )}
 
                         </div>
 
                     </section>
-
                 )}
 
-
                 {/* ==========================================
-            SELECTED QUICK CATEGORY
-        ========================================== */}
+                    INTERVIEW CONFIGURATION
+                ========================================== */}
 
-                {mode === "quick" &&
-                    currentCategory && (
+                <section
+                    className="
+                        bg-[#11182B]
+                        border
+                        border-[#252F4A]
+                        rounded-2xl
+                        p-7
+                        mb-8
+                    "
+                >
 
-                        <section
+                    {/* CATEGORY */}
+
+                    <div className="mb-7">
+
+                        <label
+                            htmlFor="category"
+                            className="block text-sm font-medium text-[#B8BFCC] mb-2"
+                        >
+                            Interview Category
+                        </label>
+
+                        <p className="text-xs text-[#697386] mb-3">
+                            Choose the area you want to practice.
+                        </p>
+
+                        <select
+                            id="category"
+                            value={category}
+                            onChange={(event) =>
+                                handleCategorySelect(
+                                    event.target.value
+                                )
+                            }
+                            disabled={
+                                categoriesLoading
+                            }
                             className="
-                mb-8
-                bg-[#11182B]
-                border
-                border-[#252F4A]
-                rounded-2xl
-                p-7
-              "
+                                w-full
+                                bg-[#0B1020]
+                                border
+                                border-[#293452]
+                                rounded-xl
+                                px-4
+                                py-3.5
+                                text-sm
+                                text-[#D8DCE5]
+                                outline-none
+                                focus:border-[#6366F1]
+                                focus:ring-1
+                                focus:ring-[#6366F1]/20
+                                cursor-pointer
+                                disabled:opacity-50
+                            "
                         >
 
-                            <div className="flex items-start justify-between gap-5 mb-6">
+                            <option value="">
+                                {categoriesLoading
+                                    ? "Loading categories..."
+                                    : "Select a category"}
+                            </option>
+
+                            {categories.map(
+                                (item) => (
+                                    <option
+                                        key={
+                                            item.value
+                                        }
+                                        value={
+                                            item.value
+                                        }
+                                        className="bg-[#11182B]"
+                                    >
+                                        {
+                                            item.label
+                                        }
+                                    </option>
+                                )
+                            )}
+
+                        </select>
+
+                    </div>
+
+                    {/* SELECTED CATEGORY */}
+
+                    {currentCategory && (
+                        <div
+                            className="
+                                flex
+                                items-center
+                                gap-3
+                                mb-7
+                                px-4
+                                py-3
+                                rounded-xl
+                                bg-[#151D33]
+                                border
+                                border-[#2A3454]
+                            "
+                        >
+
+                            <div
+                                className="
+                                    w-9
+                                    h-9
+                                    rounded-lg
+                                    bg-[#20284A]
+                                    border
+                                    border-[#343D63]
+                                    flex
+                                    items-center
+                                    justify-center
+                                    shrink-0
+                                "
+                            >
+                                <span className="text-[#A78BFA] text-xs font-bold">
+                                    {currentCategory.label
+                                        .split(" ")
+                                        .map(
+                                            (word) =>
+                                                word[0]
+                                        )
+                                        .join("")
+                                        .slice(
+                                            0,
+                                            2
+                                        )
+                                        .toUpperCase()}
+                                </span>
+                            </div>
+
+                            <div>
+
+                                <p className="text-sm font-medium text-[#D8DCE5]">
+                                    {
+                                        currentCategory.label
+                                    }
+                                </p>
+
+                                <p className="text-xs text-[#6F7889] mt-0.5">
+                                    {
+                                        currentCategory.description ||
+                                        "Technical interview practice"
+                                    }
+                                </p>
+
+                            </div>
+
+                        </div>
+                    )}
+
+                    {/* TOPIC SEARCH */}
+
+                    <div className="mb-7">
+
+                        <label
+                            htmlFor="topic-search"
+                            className="block text-sm font-medium text-[#B8BFCC] mb-2"
+                        >
+                            Search Topic
+                        </label>
+
+                        <p className="text-xs text-[#697386] mb-3">
+                            Search for a topic within your selected category.
+                        </p>
+
+                        <div className="relative">
+
+                            <div
+                                className="
+                                    absolute
+                                    left-4
+                                    top-1/2
+                                    -translate-y-1/2
+                                    text-[#5E687C]
+                                    pointer-events-none
+                                "
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.8"
+                                    className="w-5 h-5"
+                                >
+                                    <circle
+                                        cx="11"
+                                        cy="11"
+                                        r="6.5"
+                                    />
+                                    <path
+                                        strokeLinecap="round"
+                                        d="M16 16l4.5 4.5"
+                                    />
+                                </svg>
+                            </div>
+
+                            <input
+                                id="topic-search"
+                                type="text"
+                                value={topicSearch}
+                                onChange={(event) => {
+                                    const value =
+                                        event.target
+                                            .value;
+
+                                    setTopicSearch(
+                                        value
+                                    );
+
+                                    // Clear previously selected
+                                    // topic if user starts typing again.
+                                    setTopic("");
+
+                                    setShowTopicResults(
+                                        Boolean(
+                                            value.trim()
+                                        )
+                                    );
+                                }}
+                                onFocus={() => {
+                                    if (
+                                        topicSearch.trim()
+                                    ) {
+                                        setShowTopicResults(
+                                            true
+                                        );
+                                    }
+                                }}
+                                disabled={!category}
+                                placeholder={
+                                    category
+                                        ? "Search topics, e.g. tree, redis, process..."
+                                        : "Select a category first"
+                                }
+                                className="
+                                    w-full
+                                    bg-[#0B1020]
+                                    border
+                                    border-[#293452]
+                                    rounded-xl
+                                    pl-12
+                                    pr-12
+                                    py-3.5
+                                    text-sm
+                                    text-[#D8DCE5]
+                                    placeholder:text-[#545D70]
+                                    outline-none
+                                    focus:border-[#6366F1]
+                                    focus:ring-1
+                                    focus:ring-[#6366F1]/20
+                                    transition
+                                    disabled:opacity-50
+                                    disabled:cursor-not-allowed
+                                "
+                            />
+
+                            {topicsLoading && (
+                                <div
+                                    className="
+                                        absolute
+                                        right-4
+                                        top-1/2
+                                        -translate-y-1/2
+                                    "
+                                >
+                                    <div
+                                        className="
+                                            w-4
+                                            h-4
+                                            rounded-full
+                                            border-2
+                                            border-[#39445F]
+                                            border-t-[#8B5CF6]
+                                            animate-spin
+                                        "
+                                    />
+                                </div>
+                            )}
+
+                            {/* ==================================
+                                SEARCH RESULTS
+                            ================================== */}
+
+                            {showTopicResults &&
+                                category &&
+                                topicSearch.trim() &&
+                                !topicsLoading && (
+
+                                    <div
+                                        className="
+                                            absolute
+                                            left-0
+                                            right-0
+                                            top-full
+                                            mt-2
+                                            z-30
+                                            bg-[#11182B]
+                                            border
+                                            border-[#303A56]
+                                            rounded-xl
+                                            shadow-2xl
+                                            shadow-black/30
+                                            overflow-hidden
+                                        "
+                                    >
+
+                                        {topics.length >
+                                        0 ? (
+
+                                            <div className="max-h-72 overflow-y-auto py-2">
+
+                                                {topics.map(
+                                                    (
+                                                        item
+                                                    ) => {
+
+                                                        const selected =
+                                                            topic ===
+                                                            item;
+
+                                                        return (
+                                                            <button
+                                                                key={
+                                                                    item
+                                                                }
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    handleTopicSelect(
+                                                                        item
+                                                                    )
+                                                                }
+                                                                className={`
+                                                                    w-full
+                                                                    px-4
+                                                                    py-3
+                                                                    text-left
+                                                                    flex
+                                                                    items-center
+                                                                    justify-between
+                                                                    gap-4
+                                                                    transition
+                                                                    ${
+                                                                        selected
+                                                                            ? "bg-[#1E2540] text-[#C4B5FD]"
+                                                                            : "text-[#B8BFCD] hover:bg-[#151D33] hover:text-[#E5E7EB]"
+                                                                    }
+                                                                `}
+                                                            >
+
+                                                                <span className="text-sm">
+                                                                    {
+                                                                        item
+                                                                    }
+                                                                </span>
+
+                                                                {selected && (
+                                                                    <svg
+                                                                        xmlns="http://www.w3.org/2000/svg"
+                                                                        viewBox="0 0 24 24"
+                                                                        fill="none"
+                                                                        stroke="currentColor"
+                                                                        strokeWidth="2"
+                                                                        className="w-4 h-4 shrink-0 text-[#8B5CF6]"
+                                                                    >
+                                                                        <path
+                                                                            strokeLinecap="round"
+                                                                            strokeLinejoin="round"
+                                                                            d="M5 12.5l4 4L19 7"
+                                                                        />
+                                                                    </svg>
+                                                                )}
+
+                                                            </button>
+                                                        );
+                                                    }
+                                                )}
+
+                                            </div>
+
+                                        ) : (
+
+                                            <div className="px-5 py-5">
+
+                                                <p className="text-sm text-[#8992A4]">
+                                                    No matching topics found.
+                                                </p>
+
+                                                <p className="text-xs text-[#606A7D] mt-1">
+                                                    Try another keyword within this category.
+                                                </p>
+
+                                            </div>
+
+                                        )}
+
+                                    </div>
+                                )}
+
+                        </div>
+
+                        {/* ==================================
+                            SELECTED TOPIC
+                        ================================== */}
+
+                        {topic && (
+                            <div
+                                className="
+                                    mt-4
+                                    flex
+                                    items-center
+                                    justify-between
+                                    gap-4
+                                    px-4
+                                    py-3
+                                    rounded-xl
+                                    bg-[#151D33]
+                                    border
+                                    border-[#303A56]
+                                "
+                            >
 
                                 <div>
 
-                                    <div className="flex items-center gap-3 mb-2">
+                                    <p className="text-[10px] uppercase tracking-widest text-[#687184]">
+                                        Selected Topic
+                                    </p>
 
-                                        <div
-                                            className="
-                        w-10
-                        h-10
-                        rounded-xl
-                        bg-[#20284A]
-                        border
-                        border-[#343D63]
-                        flex
-                        items-center
-                        justify-center
-                      "
-                                        >
-
-                                            <span className="text-[#A78BFA] font-bold text-xs">
-                                                {category === "dsa"
-                                                    ? "DS"
-                                                    : category === "backend"
-                                                        ? "BE"
-                                                        : "SD"}
-                                            </span>
-
-                                        </div>
-
-                                        <div>
-
-                                            <h3 className="text-lg font-semibold text-[#DDE1E9]">
-                                                {currentCategory.label}
-                                            </h3>
-
-                                            <p className="text-sm text-[#70798B]">
-                                                {currentCategory.description}
-                                            </p>
-
-                                        </div>
-
-                                    </div>
+                                    <p className="text-sm font-medium text-[#D8DCE5] mt-1 capitalize">
+                                        {topic}
+                                    </p>
 
                                 </div>
-
-
-                                {/* Change category */}
 
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        setCategory("");
                                         setTopic("");
-                                        setMode("custom");
-
-                                        navigate(
-                                            "/create-interview",
-                                            { replace: true }
+                                        setTopicSearch("");
+                                        setTopics([]);
+                                        setShowTopicResults(
+                                            false
                                         );
                                     }}
                                     className="
-                    text-xs
-                    text-[#7C8494]
-                    hover:text-[#A78BFA]
-                    transition
-                  "
+                                        text-xs
+                                        text-[#697386]
+                                        hover:text-[#C4B5FD]
+                                        transition
+                                    "
                                 >
                                     Change
                                 </button>
 
                             </div>
-
-
-                            {/* TOPIC */}
-
-                            <label className="block text-sm font-medium text-[#B8BFCC] mb-2">
-                                Choose a topic
-                            </label>
-
-                            <p className="text-xs text-[#697386] mb-3">
-                                Select a focused topic for your interview.
-                            </p>
-
-                            <select
-                                value={topic}
-                                onChange={(e) =>
-                                    setTopic(e.target.value)
-                                }
-                                className="
-                  w-full
-                  bg-[#0B1020]
-                  border
-                  border-[#293452]
-                  rounded-xl
-                  px-4
-                  py-3.5
-                  text-sm
-                  text-[#D8DCE5]
-                  outline-none
-                  focus:border-[#6366F1]
-                  focus:ring-1
-                  focus:ring-[#6366F1]/20
-                  transition
-                "
-                            >
-
-                                {currentCategory.topics.map(
-                                    (item) => (
-                                        <option
-                                            key={item}
-                                            value={item}
-                                            className="bg-[#11182B]"
-                                        >
-                                            {item}
-                                        </option>
-                                    )
-                                )}
-
-                            </select>
-
-                            <div className="mt-5 flex items-center justify-between">
-
-                                <p className="text-sm text-[#697386]">
-                                    Can't find the topic you're looking for?
-                                </p>
-
-                                <button
-                                    type="button"
-                                    onClick={handleCustomSelect}
-                                    className="
-                    text-sm
-                    font-medium
-                    text-[#A78BFA]
-                    hover:text-[#C4B5FD]
-                    transition
-                    "
-                                >
-                                    Create Custom Interview →
-                                </button>
-
-                            </div>
-
-                        </section>
-
-                    )}
-
-
-                {/* ==========================================
-            CUSTOM INTERVIEW
-        ========================================== */}
-
-                {!validCategory && (
-
-                    <section
-                        className={`
-              mb-8
-              rounded-2xl
-              border
-              p-7
-              transition
-              ${mode === "custom"
-                                ? "border-[#6366F1] bg-[#151B31]"
-                                : "border-[#252F4A] bg-[#11182B]"
-                            }
-            `}
-                    >
-
-                        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-5">
-
-                            <div>
-
-                                <div className="flex items-center gap-3 mb-2">
-
-                                    <div
-                                        className="
-                      w-9
-                      h-9
-                      rounded-lg
-                      bg-[#1E2540]
-                      border
-                      border-[#343D63]
-                      flex
-                      items-center
-                      justify-center
-                    "
-                                    >
-                                        <span className="text-[#A78BFA] text-sm font-semibold">
-                                            +
-                                        </span>
-                                    </div>
-
-                                    <h3 className="text-base font-semibold text-[#DDE1E9]">
-                                        Custom Interview
-                                    </h3>
-
-                                </div>
-
-                                <p className="text-sm text-[#737C8E] max-w-xl leading-6">
-                                    Have something specific in mind?
-                                    Enter any technical topic and let AI
-                                    generate the questions.
-                                </p>
-
-                            </div>
-
-
-                            <button
-                                type="button"
-                                onClick={handleCustomSelect}
-                                className={`
-                  px-5
-                  py-2.5
-                  rounded-xl
-                  text-sm
-                  font-medium
-                  transition
-                  ${mode === "custom"
-                                        ? "bg-[#6366F1] text-white"
-                                        : "border border-[#343E61] text-[#AEB5C3] hover:text-white hover:border-[#4A577A]"
-                                    }
-                `}
-                            >
-                                {mode === "custom"
-                                    ? "Selected"
-                                    : "Use Custom"}
-                            </button>
-
-                        </div>
-
-
-                        {/* CUSTOM TOPIC INPUT */}
-
-                        {mode === "custom" && (
-
-                            <div className="mt-6">
-
-                                <label className="block text-sm font-medium text-[#B8BFCC] mb-2">
-                                    Your Topic
-                                </label>
-
-                                <input
-                                    type="text"
-                                    placeholder="e.g. Operating Systems, Docker, Cyber Security"
-                                    value={topic}
-                                    onChange={(e) =>
-                                        setTopic(e.target.value)
-                                    }
-                                    className="
-                    w-full
-                    bg-[#0B1020]
-                    border
-                    border-[#293452]
-                    rounded-xl
-                    px-4
-                    py-3.5
-                    text-sm
-                    text-[#D8DCE5]
-                    placeholder:text-[#545D70]
-                    outline-none
-                    focus:border-[#6366F1]
-                    focus:ring-1
-                    focus:ring-[#6366F1]/20
-                    transition
-                  "
-                                />
-
-                            </div>
-
                         )}
-
-                    </section>
-
-                )}
-
-
-                {/* ==========================================
-            DIFFICULTY
-        ========================================== */}
-
-                <section
-                    className="
-            bg-[#11182B]
-            border
-            border-[#252F4A]
-            rounded-2xl
-            p-7
-            mb-8
-          "
-                >
-
-                    <div className="mb-5">
-
-                        <h3 className="text-base font-semibold text-[#DDE1E9]">
-                            Difficulty Level
-                        </h3>
-
-                        <p className="text-sm text-[#70798B] mt-1">
-                            Choose how challenging you want the interview to be.
-                        </p>
 
                     </div>
 
+                    {/* ==========================================
+                        DIFFICULTY
+                    ========================================== */}
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
 
-                        {difficulties.map((item) => {
+                        <div className="mb-5">
 
-                            const selected =
-                                difficulty === item.value;
+                            <h3 className="text-base font-semibold text-[#DDE1E9]">
+                                Difficulty Level
+                            </h3>
 
-                            return (
-                                <button
-                                    key={item.value}
-                                    type="button"
-                                    onClick={() =>
-                                        setDifficulty(item.value)
-                                    }
-                                    className={`
-                    text-left
-                    p-5
-                    rounded-xl
-                    border
-                    transition
-                    duration-200
-                    ${selected
-                                            ? "bg-[#1A203A] border-[#6366F1]"
-                                            : "bg-[#0D1425] border-[#293452] hover:border-[#39476D]"
-                                        }
-                  `}
-                                >
+                            <p className="text-sm text-[#70798B] mt-1">
+                                Choose how challenging you want the interview to be.
+                            </p>
 
-                                    <div className="flex items-center justify-between mb-3">
+                        </div>
 
-                                        <span
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+                            {difficulties.map(
+                                (item) => {
+
+                                    const selected =
+                                        difficulty ===
+                                        item.value;
+
+                                    return (
+                                        <button
+                                            key={
+                                                item.value
+                                            }
+                                            type="button"
+                                            onClick={() =>
+                                                setDifficulty(
+                                                    item.value
+                                                )
+                                            }
                                             className={`
-                        text-sm
-                        font-semibold
-                        ${selected
-                                                    ? "text-[#C4B5FD]"
-                                                    : "text-[#C5CBD6]"
+                                                text-left
+                                                p-5
+                                                rounded-xl
+                                                border
+                                                transition
+                                                duration-200
+                                                ${
+                                                    selected
+                                                        ? "bg-[#1A203A] border-[#6366F1]"
+                                                        : "bg-[#0D1425] border-[#293452] hover:border-[#39476D]"
                                                 }
-                      `}
-                                        >
-                                            {item.label}
-                                        </span>
-
-                                        <span
-                                            className={`
-                        w-4
-                        h-4
-                        rounded-full
-                        border
-                        flex
-                        items-center
-                        justify-center
-                        ${selected
-                                                    ? "border-[#8B5CF6]"
-                                                    : "border-[#46516D]"
-                                                }
-                      `}
+                                            `}
                                         >
 
-                                            {selected && (
-                                                <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />
-                                            )}
+                                            <div className="flex items-center justify-between mb-3">
 
-                                        </span>
+                                                <span
+                                                    className={`
+                                                        text-sm
+                                                        font-semibold
+                                                        ${
+                                                            selected
+                                                                ? "text-[#C4B5FD]"
+                                                                : "text-[#C5CBD6]"
+                                                        }
+                                                    `}
+                                                >
+                                                    {
+                                                        item.label
+                                                    }
+                                                </span>
 
-                                    </div>
+                                                <span
+                                                    className={`
+                                                        w-4
+                                                        h-4
+                                                        rounded-full
+                                                        border
+                                                        flex
+                                                        items-center
+                                                        justify-center
+                                                        ${
+                                                            selected
+                                                                ? "border-[#8B5CF6]"
+                                                                : "border-[#46516D]"
+                                                        }
+                                                    `}
+                                                >
 
-                                    <p className="text-xs text-[#737C8E]">
-                                        {item.description}
-                                    </p>
+                                                    {selected && (
+                                                        <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />
+                                                    )}
 
-                                </button>
-                            );
-                        })}
+                                                </span>
+
+                                            </div>
+
+                                            <p className="text-xs text-[#737C8E]">
+                                                {
+                                                    item.description
+                                                }
+                                            </p>
+
+                                        </button>
+                                    );
+                                }
+                            )}
+
+                        </div>
 
                     </div>
 
                 </section>
 
-
                 {/* ==========================================
-            AI INFORMATION
-        ========================================== */}
+                    AI INFORMATION
+                ========================================== */}
 
                 <section
                     className="
-            bg-[#151B30]
-            border
-            border-[#2C3555]
-            rounded-2xl
-            p-6
-            mb-8
-          "
+                        bg-[#151B30]
+                        border
+                        border-[#2C3555]
+                        rounded-2xl
+                        p-6
+                        mb-8
+                    "
                 >
 
                     <div className="flex items-start gap-4">
 
                         <div
                             className="
-                w-10
-                h-10
-                rounded-xl
-                bg-gradient-to-br
-                from-[#252D52]
-                to-[#30234D]
-                border
-                border-[#3A4168]
-                flex
-                items-center
-                justify-center
-                shrink-0
-              "
+                                w-10
+                                h-10
+                                rounded-xl
+                                bg-gradient-to-br
+                                from-[#252D52]
+                                to-[#30234D]
+                                border
+                                border-[#3A4168]
+                                flex
+                                items-center
+                                justify-center
+                                shrink-0
+                            "
                         >
                             <span className="text-[#A78BFA] text-xs font-bold">
                                 AI
@@ -966,7 +1242,9 @@ function CreateInterview() {
                             <p className="text-sm text-[#788194] mt-1 leading-6">
                                 We'll generate five technical
                                 questions based on your selected
-                                topic and difficulty.
+                                topic and difficulty. Previously
+                                used questions for this topic and
+                                difficulty are excluded from generation.
                             </p>
 
                         </div>
@@ -975,23 +1253,21 @@ function CreateInterview() {
 
                 </section>
 
-
                 {/* ==========================================
-            ERROR
-        ========================================== */}
+                    ERROR
+                ========================================== */}
 
                 {error && (
-
                     <div
                         className="
-              rounded-xl
-              border
-              border-red-500/20
-              bg-red-500/5
-              px-4
-              py-3
-              mb-6
-            "
+                            rounded-xl
+                            border
+                            border-red-500/20
+                            bg-red-500/5
+                            px-4
+                            py-3
+                            mb-6
+                        "
                     >
 
                         <p className="text-sm text-red-400">
@@ -999,13 +1275,11 @@ function CreateInterview() {
                         </p>
 
                     </div>
-
                 )}
 
-
                 {/* ==========================================
-            ACTIONS
-        ========================================== */}
+                    ACTIONS
+                ========================================== */}
 
                 <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-4">
 
@@ -1015,45 +1289,48 @@ function CreateInterview() {
                             navigate("/dashboard")
                         }
                         className="
-              px-5
-              py-3
-              rounded-xl
-              border
-              border-[#303A56]
-              text-sm
-              text-[#81899A]
-              hover:text-[#D1D5DB]
-              hover:border-[#46516E]
-              transition
-            "
+                            px-5
+                            py-3
+                            rounded-xl
+                            border
+                            border-[#303A56]
+                            text-sm
+                            text-[#81899A]
+                            hover:text-[#D1D5DB]
+                            hover:border-[#46516E]
+                            transition
+                        "
                     >
                         Cancel
                     </button>
 
-
                     <button
                         type="button"
                         onClick={handleSubmit}
-                        disabled={loading}
+                        disabled={
+                            loading ||
+                            !category ||
+                            !topic
+                        }
                         className="
-              px-7
-              py-3
-              rounded-xl
-              bg-gradient-to-r
-              from-[#6366F1]
-              to-[#8B5CF6]
-              hover:from-[#7073F5]
-              hover:to-[#9568F8]
-              disabled:opacity-50
-              disabled:cursor-not-allowed
-              text-white
-              font-semibold
-              text-sm
-              shadow-lg
-              shadow-indigo-950/20
-              transition
-              duration-200
-            "
+                            px-7
+                            py-3
+                            rounded-xl
+                            bg-gradient-to-r
+                            from-[#6366F1]
+                            to-[#8B5CF6]
+                            hover:from-[#7073F5]
+                            hover:to-[#9568F8]
+                            disabled:opacity-50
+                            disabled:cursor-not-allowed
+                            text-white
+                            font-semibold
+                            text-sm
+                            shadow-lg
+                            shadow-indigo-950/20
+                            transition
+                            duration-200
+                        "
                     >
                         {loading
                             ? "Generating Interview..."
