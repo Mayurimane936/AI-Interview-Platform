@@ -33,6 +33,8 @@ function Interview() {
         }
 
         try {
+            setIsSpeaking(true);
+
             if (audioRef.current) {
                 audioRef.current.pause();
                 audioRef.current.currentTime = 0;
@@ -49,10 +51,26 @@ function Interview() {
             const audio = new Audio(audioUrl);
             audioRef.current = audio;
 
+            audio.onended = () => {
+                setIsSpeaking(false);
+            };
+
+            audio.onerror = () => {
+                setIsSpeaking(false);
+            };
+
             await audio.play();
         } catch (error) {
             console.error("AZURE TTS ERROR:", error);
+            setIsSpeaking(false);
         }
+    };
+
+    const speakWelcome = async () => {
+        const welcomeText =
+            "Welcome to your AI technical interview. You will receive one question at a time. Please explain your reasoning clearly and take your time. When you are ready, click Start Interview to begin.";
+
+        await speakQuestion(welcomeText);
     };
 
     const [interview, setInterview] = useState(null);
@@ -73,6 +91,9 @@ function Interview() {
     const [evaluationError, setEvaluationError] =
         useState("");
 
+    const [isSpeaking, setIsSpeaking] =
+        useState(false);
+
     // =========================================================
     // VOICE ANSWER STATE
     // =========================================================
@@ -89,14 +110,25 @@ function Interview() {
     const [interimTranscript, setInterimTranscript] =
         useState("");
 
+    const [silencePromptOpen, setSilencePromptOpen] =
+        useState(false);
+
     const speechRecognizerRef = useRef(null);
     const speechTokenRef = useRef(null);
+    const silenceTimerRef = useRef(null);
 
     const [submittedAnswers, setSubmittedAnswers] =
         useState({});
 
     useEffect(() => {
         return () => {
+            setIsSpeaking(false);
+
+            if (silenceTimerRef.current) {
+                clearTimeout(silenceTimerRef.current);
+                silenceTimerRef.current = null;
+            }
+
             const recognizer =
                 speechRecognizerRef.current;
 
@@ -126,12 +158,59 @@ function Interview() {
     // AZURE SPEECH RECOGNITION
     // =========================================================
 
-    const cleanupSpeechRecognizer = async () => {
+    const clearSilenceTimer = () => {
+        if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = null;
+        }
+    };
+
+    const startSilenceTimer = () => {
+        clearSilenceTimer();
+
+        silenceTimerRef.current = setTimeout(async () => {
+            silenceTimerRef.current = null;
+
+            const recognizer =
+                speechRecognizerRef.current;
+
+            if (!recognizer || hasSubmitted || submitting) {
+                return;
+            }
+
+            try {
+                await new Promise((resolve) => {
+                    recognizer.stopContinuousRecognitionAsync(
+                        () => resolve(),
+                        () => resolve()
+                    );
+                });
+            } catch (error) {
+                console.error(
+                    "AZURE STT SILENCE STOP ERROR:",
+                    error
+                );
+            }
+
+            setIsListening(false);
+            setInterimTranscript("");
+            setSilencePromptOpen(true);
+        }, 3000);
+    };
+
+    const cleanupSpeechRecognizer = async ({
+        clearAnswerInterim = true,
+        closeRecognizer = true,
+    } = {}) => {
+        clearSilenceTimer();
+
         const recognizer = speechRecognizerRef.current;
 
         if (!recognizer) {
             setIsListening(false);
-            setInterimTranscript("");
+            if (clearAnswerInterim) {
+                setInterimTranscript("");
+            }
             return;
         }
 
@@ -152,19 +231,26 @@ function Interview() {
             );
         }
 
-        try {
-            recognizer.close();
-        } catch {
-            // Recognizer may already be closed.
+        if (closeRecognizer) {
+            try {
+                recognizer.close();
+            } catch {
+                // Recognizer may already be closed.
+            }
         }
 
         setIsListening(false);
-        setInterimTranscript("");
+        if (clearAnswerInterim) {
+            setInterimTranscript("");
+        }
     };
 
     // Stop speech recognition whenever
     // the user moves to another question.
     useEffect(() => {
+        setSilencePromptOpen(false);
+        clearSilenceTimer();
+
         if (speechRecognizerRef.current) {
             cleanupSpeechRecognizer();
         }
@@ -189,6 +275,8 @@ function Interview() {
         try {
             setSpeechError("");
             setInterimTranscript("");
+            setSilencePromptOpen(false);
+            clearSilenceTimer();
 
             const speechAuth = await getSpeechToken();
 
@@ -235,6 +323,8 @@ function Interview() {
                     setInterimTranscript(
                         event.result.text
                     );
+
+                    startSilenceTimer();
                 }
             };
 
@@ -273,6 +363,7 @@ function Interview() {
                     }
 
                     setInterimTranscript("");
+                    startSilenceTimer();
                 }
             };
 
@@ -292,6 +383,9 @@ function Interview() {
                 ) {
                     return;
                 }
+
+                clearSilenceTimer();
+                setSilencePromptOpen(false);
 
                 setSpeechError(
                     event.errorDetails ||
@@ -376,6 +470,9 @@ function Interview() {
     };
 
     const handleStopListening = async () => {
+        setSilencePromptOpen(false);
+        clearSilenceTimer();
+
         const recognizer =
             speechRecognizerRef.current;
 
@@ -419,6 +516,47 @@ function Interview() {
 
             setIsListening(false);
             setInterimTranscript("");
+        }
+    };
+
+    const handleContinueListening = async () => {
+        const recognizer = speechRecognizerRef.current;
+
+        if (!recognizer || hasSubmitted || submitting) {
+            return;
+        }
+
+        try {
+            clearSilenceTimer();
+            setSilencePromptOpen(false);
+            setSpeechError("");
+            setInterimTranscript("");
+
+            await new Promise((resolve, reject) => {
+                recognizer.startContinuousRecognitionAsync(
+                    () => {
+                        setIsListening(true);
+                        resolve();
+                    },
+                    (error) => {
+                        reject(
+                            new Error(
+                                String(error)
+                            )
+                        );
+                    }
+                );
+            });
+        } catch (error) {
+            console.error(
+                "AZURE STT RESUME ERROR:",
+                error
+            );
+
+            setSpeechError(
+                error?.message ||
+                    "Unable to continue speech recognition. Please try again."
+            );
         }
     };
 
@@ -808,6 +946,16 @@ function Interview() {
         questions[currentQuestionIndex];
 
     // =========================================================
+    // WELCOME MESSAGE
+    // =========================================================
+
+    useEffect(() => {
+        if (interview?.status === "created") {
+            speakWelcome();
+        }
+    }, [interview?.status]);
+
+    // =========================================================
     // READ QUESTION ALOUD
     // =========================================================
 
@@ -820,6 +968,8 @@ function Interview() {
         }
 
         return () => {
+            setIsSpeaking(false);
+
             if (audioRef.current) {
                 audioRef.current.pause();
                 audioRef.current.currentTime = 0;
@@ -1355,10 +1505,97 @@ function Interview() {
 
                                 {/* Question text */}
 
+                                {isSpeaking && (
+                                    <div className="px-7 pt-6">
+                                        <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-[#1E2540] border border-[#343D63] text-[#C4B5FD]">
+                                            <span className="relative flex w-2.5 h-2.5">
+                                                <span className="absolute inline-flex w-full h-full rounded-full bg-[#818CF8] opacity-50 animate-ping" />
+                                                <span className="relative inline-flex w-2.5 h-2.5 rounded-full bg-[#818CF8]" />
+                                            </span>
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="1.8"
+                                                className="w-4 h-4"
+                                            >
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5L6 9H3v6h3l5 4V5z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.5 8.5a5 5 0 010 7" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M18.5 5.5a9 9 0 010 13" />
+                                            </svg>
+                                            <span className="text-xs font-medium">AI is reading the question...</span>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="px-7 py-8">
 
-                                    <p className="text-lg md:text-xl leading-8 text-[#D1D5DF]">
-                                        {currentQuestion.question_text}
+                                    <div className="flex items-start gap-4">
+
+                                        <p className="flex-1 text-lg md:text-xl leading-8 text-[#D1D5DF]">
+                                            {currentQuestion.question_text}
+                                        </p>
+
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                speakQuestion(
+                                                    currentQuestion.question_text
+                                                )
+                                            }
+                                            disabled={isListening || submitting || isSpeaking}
+                                            aria-label="Listen to question again"
+                                            title="Listen to question again"
+                                            className="
+                                                shrink-0
+                                                w-10
+                                                h-10
+                                                rounded-xl
+                                                bg-[#1E2540]
+                                                border
+                                                border-[#343D63]
+                                                text-[#C4B5FD]
+                                                hover:bg-[#252D4C]
+                                                hover:border-[#46516E]
+                                                disabled:opacity-40
+                                                disabled:cursor-not-allowed
+                                                flex
+                                                items-center
+                                                justify-center
+                                                transition
+                                            "
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="1.8"
+                                                className="w-5 h-5"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    d="M11 5L6 9H3v6h3l5 4V5z"
+                                                />
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    d="M15.5 8.5a5 5 0 010 7"
+                                                />
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    d="M18 6a9 9 0 010 12"
+                                                />
+                                            </svg>
+                                        </button>
+
+                                    </div>
+
+                                    <p className="text-xs text-[#5E687A] mt-3">
+                                        Click the speaker icon to hear the question again.
                                     </p>
 
                                 </div>
@@ -1500,7 +1737,7 @@ function Interview() {
                                                     "
                                                 >
                                                     <span className="w-2 h-2 rounded-full bg-red-400" />
-                                                    Stop Answer
+                                                    Finish Answer
                                                 </button>
                                             ) : (
                                                 <button
@@ -2008,6 +2245,131 @@ function Interview() {
                     )}
 
             </main>
+
+
+            {/* =========================================================
+                SILENCE CONFIRMATION POPUP
+            ========================================================== */}
+
+            {silencePromptOpen && (
+                <div
+                    className="
+                        fixed
+                        inset-0
+                        z-50
+                        flex
+                        items-center
+                        justify-center
+                        px-6
+                        bg-black/60
+                        backdrop-blur-sm
+                    "
+                >
+                    <div
+                        className="
+                            w-full
+                            max-w-md
+                            bg-[#11182B]
+                            border
+                            border-[#252F4A]
+                            rounded-2xl
+                            shadow-2xl
+                            p-7
+                        "
+                    >
+                        <div className="flex items-start gap-4">
+                            <div
+                                className="
+                                    w-12
+                                    h-12
+                                    rounded-xl
+                                    bg-indigo-500/10
+                                    border
+                                    border-indigo-500/20
+                                    flex
+                                    items-center
+                                    justify-center
+                                    shrink-0
+                                "
+                            >
+                                <span className="text-[#A78BFA] text-xl">
+                                    ◌
+                                </span>
+                            </div>
+
+                            <div>
+                                <h3 className="text-lg font-semibold text-[#E5E7EB]">
+                                    Are you done with your answer?
+                                </h3>
+
+                                <p className="text-sm text-[#9CA3AF] mt-2 leading-6">
+                                    We haven't detected speech for 3 seconds.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div
+                            className="
+                                mt-5
+                                rounded-xl
+                                bg-[#0B1020]
+                                border
+                                border-[#252F4A]
+                                p-4
+                            "
+                        >
+                            <p className="text-xs text-[#6B7280] leading-5">
+                                Your transcript is safe in the answer box. You can continue speaking or finish your answer.
+                            </p>
+                        </div>
+
+                        <div className="flex justify-end gap-3 mt-6">
+                            <button
+                                type="button"
+                                onClick={handleContinueListening}
+                                className="
+                                    px-5
+                                    py-2.5
+                                    rounded-xl
+                                    border
+                                    border-[#293452]
+                                    text-[#C4B5FD]
+                                    hover:bg-[#151D33]
+                                    text-sm
+                                    font-medium
+                                    transition
+                                "
+                            >
+                                Continue Speaking
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    setSilencePromptOpen(false);
+                                    await cleanupSpeechRecognizer();
+                                }}
+                                className="
+                                    px-5
+                                    py-2.5
+                                    rounded-xl
+                                    bg-gradient-to-r
+                                    from-[#6366F1]
+                                    to-[#8B5CF6]
+                                    hover:from-[#7073F5]
+                                    hover:to-[#9568F8]
+                                    text-white
+                                    font-semibold
+                                    text-sm
+                                    transition
+                                "
+                            >
+                                Finish Answer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
 
             {/* =========================================================
