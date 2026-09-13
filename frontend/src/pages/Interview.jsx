@@ -635,11 +635,12 @@ function Interview() {
     };
 
     const handlePasteCancel = () => {
+        // The paste has not been committed yet because the paste
+        // event is prevented. Keep the user's existing answer
+        // exactly as it was and discard only the pending paste.
         setPasteWarningOpen(false);
         setPendingPastedValue("");
-        setAnswer("");
         setInterimTranscript("");
-        setAnswerWasPasted(false);
     };
 
     const handlePasteContinue = () => {
@@ -1389,55 +1390,6 @@ function Interview() {
                                     reasoning, and submit your answer when
                                     you're ready.
                                 </p>
-
-                                <button
-                                    type="button"
-                                    onClick={speakWelcome}
-                                    className="
-                                        inline-flex
-                                        items-center
-                                        gap-2
-                                        mt-5
-                                        px-4
-                                        py-2.5
-                                        rounded-xl
-                                        bg-[#1E2540]
-                                        border
-                                        border-[#343D63]
-                                        text-[#C4B5FD]
-                                        hover:bg-[#252D4C]
-                                        hover:border-[#46516E]
-                                        text-sm
-                                        font-medium
-                                        transition
-                                    "
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="1.8"
-                                        className="w-4 h-4"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M11 5L6 9H3v6h3l5 4V5z"
-                                        />
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M15.5 8.5a5 5 0 010 7"
-                                        />
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M18 6a9 9 0 010 12"
-                                        />
-                                    </svg>
-                                    Hear introduction again
-                                </button>
 
                                 <div className="grid grid-cols-2 gap-3 mt-7">
 
@@ -2282,13 +2234,13 @@ function Interview() {
 
                         <div className="mt-5 rounded-xl bg-[#0B1020] border border-[#252F4A] p-4">
                             <p className="text-xs text-[#70798B] leading-5">
-                                Choose Clear Answer to remove it, or Continue Anyway to keep the pasted content.
+                                Choose Clear Pasted Text to discard it, or Continue Anyway to keep it with your answer.
                             </p>
                         </div>
 
                         <div className="flex justify-end gap-3 mt-6">
                             <button type="button" onClick={handlePasteCancel} className="px-5 py-2.5 rounded-xl border border-[#293452] text-[#9CA3AF] hover:text-[#E5E7EB] hover:bg-[#151D33] text-sm font-medium transition">
-                                Clear Answer
+                                Clear Pasted Text
                             </button>
                             <button type="button" onClick={handlePasteContinue} className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#7073F5] hover:to-[#9568F8] text-white font-semibold text-sm transition">
                                 Continue Anyway
