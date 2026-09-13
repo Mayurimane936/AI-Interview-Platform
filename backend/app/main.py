@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from app.api.analytics import router as analytics_router
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.dashboard import router as dashboard_router
-
+from app.api import speech, stt
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -79,6 +79,13 @@ app.include_router(
     tags=["Dashboard"],
 )
 
+app.include_router(
+    speech.router,
+    prefix="/speech",
+    tags=["Speech"],
+)
+
+app.include_router(stt.router, prefix="/stt", tags=["Speech-to-Text"])
 
 @app.get("/")
 def root():

@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
+import { synthesizeSpeech } from "../api/speech";
+import { transcribeAudio } from "../api/stt";
 
 import {
     getInterview,
@@ -14,8 +16,46 @@ import {
 
 function Interview() {
     const { interviewId } = useParams();
-    const { token } = useAuth();
+    const { token, logout } = useAuth();
     const navigate = useNavigate();
+
+    // =========================================================
+    // TEXT-TO-SPEECH
+    // =========================================================
+
+    const audioRef = useRef(null);
+    const audioUrlRef = useRef(null);
+
+    const speakQuestion = async (text) => {
+        if (!text) {
+            return;
+        }
+
+        try {
+            // Stop previous audio
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current.currentTime = 0;
+            }
+
+            // Release previous object URL
+            if (audioUrlRef.current) {
+                URL.revokeObjectURL(audioUrlRef.current);
+                audioUrlRef.current = null;
+            }
+
+            const audioUrl = await synthesizeSpeech(text);
+
+            audioUrlRef.current = audioUrl;
+
+            const audio = new Audio(audioUrl);
+            audioRef.current = audio;
+
+            await audio.play();
+        } catch (error) {
+            console.error("AZURE TTS ERROR:", error);
+        }
+    };
 
     const [interview, setInterview] = useState(null);
     const [questions, setQuestions] = useState([]);
@@ -35,8 +75,262 @@ function Interview() {
     const [evaluationError, setEvaluationError] =
         useState("");
 
+    // =========================================================
+    // VOICE ANSWER STATE
+    // =========================================================
+
+    const [isListening, setIsListening] =
+        useState(false);
+
+    const [speechSupported, setSpeechSupported] =
+        useState(true);
+
+    const [speechError, setSpeechError] =
+        useState("");
+
+    const [interimTranscript, setInterimTranscript] =
+        useState("");
+
+    const mediaRecorderRef = useRef(null);
+    const audioChunksRef = useRef([]);
+    const mediaStreamRef = useRef(null);
+
     const [submittedAnswers, setSubmittedAnswers] =
         useState({});
+
+    // =========================================================
+    // SPEECH RECOGNITION SETUP
+    // =========================================================
+
+
+    // Stop speech recognition whenever
+    // the user moves to another question.
+    useEffect(() => {
+        if (mediaRecorderRef.current) {
+            try {
+                if (
+                    mediaRecorderRef.current.state !==
+                    "inactive"
+                ) {
+                    mediaRecorderRef.current.stop();
+                }
+            } catch (error) {
+                console.error(
+                    "RECORDER STOP ERROR:",
+                    error
+                );
+            }
+
+            mediaRecorderRef.current = null;
+        }
+
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current
+                .getTracks()
+                .forEach((track) => track.stop());
+
+            mediaStreamRef.current = null;
+        }
+
+        audioChunksRef.current = [];
+
+        setIsListening(false);
+        setInterimTranscript("");
+        setSpeechError("");
+    }, [currentQuestionIndex]);
+    // =========================================================
+    // START / STOP VOICE INPUT
+    // =========================================================
+    const handleStartListening = async () => {
+        if (hasSubmitted || submitting) {
+            return;
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+            setSpeechSupported(false);
+            setSpeechError(
+                "Microphone recording is not supported in this browser."
+            );
+            return;
+        }
+
+        try {
+            setSpeechError("");
+
+            const stream =
+                await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                });
+
+            mediaStreamRef.current = stream;
+            audioChunksRef.current = [];
+
+            const mediaRecorder =
+                new MediaRecorder(stream);
+
+            mediaRecorderRef.current =
+                mediaRecorder;
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunksRef.current.push(
+                        event.data
+                    );
+                }
+            };
+
+            mediaRecorder.onstart = () => {
+                setIsListening(true);
+            };
+
+            mediaRecorder.start();
+
+        } catch (error) {
+            console.error(
+                "MICROPHONE START ERROR:",
+                error
+            );
+
+            setIsListening(false);
+
+            if (error.name === "NotAllowedError") {
+                setSpeechError(
+                    "Microphone permission was denied. Please allow microphone access in your browser."
+                );
+            } else {
+                setSpeechError(
+                    "Unable to access your microphone. Please try again."
+                );
+            }
+        }
+    };
+
+    const handleStopListening = () => {
+        const mediaRecorder = mediaRecorderRef.current;
+
+        if (!mediaRecorder) {
+            return;
+        }
+
+        mediaRecorder.onstop = async () => {
+            setIsListening(false);
+
+            if (mediaStreamRef.current) {
+                mediaStreamRef.current
+                    .getTracks()
+                    .forEach((track) => track.stop());
+
+                mediaStreamRef.current = null;
+            }
+
+            const audioBlob = new Blob(
+                audioChunksRef.current,
+                {
+                    type: "audio/webm",
+                }
+            );
+
+            audioChunksRef.current = [];
+
+            if (!audioBlob.size) {
+                setSpeechError(
+                    "No audio was recorded. Please try again."
+                );
+                return;
+            }
+
+            try {
+                setSpeechError("");
+
+                const data =
+                    await transcribeAudio(audioBlob);
+
+                const transcript =
+                    data?.transcript?.trim();
+
+                if (!transcript) {
+                    setSpeechError(
+                        "No speech was recognized. Please try again."
+                    );
+                    return;
+                }
+
+                setAnswer((previous) => {
+                    const separator =
+                        previous &&
+                            !previous.endsWith(" ")
+                            ? " "
+                            : "";
+
+                    return (
+                        previous +
+                        separator +
+                        transcript
+                    );
+                });
+
+            } catch (error) {
+                console.error(
+                    "AZURE STT ERROR:",
+                    error
+                );
+
+                setSpeechError(
+                    error.message ||
+                    "Unable to transcribe your answer. Please try again."
+                );
+            }
+        };
+
+        mediaRecorder.stop();
+        mediaRecorderRef.current = null;
+    };
+
+    const handleClearAnswer = () => {
+        if (hasSubmitted) {
+            return;
+        }
+
+        setAnswer("");
+        setInterimTranscript("");
+        setError("");
+    };
+
+    // =========================================================
+    // ANSWER TEXTAREA - DELETE ONLY
+    // =========================================================
+
+    const handleAnswerChange = (event) => {
+        if (hasSubmitted) {
+            return;
+        }
+
+        const newValue =
+            event.target.value;
+
+        const displayedValue =
+            answer + interimTranscript;
+
+        // Only allow the value to become
+        // shorter. This prevents normal typing.
+        if (
+            newValue.length <
+            displayedValue.length
+        ) {
+            setAnswer(newValue);
+            setInterimTranscript("");
+            return;
+        }
+
+        // Allow React to keep the exact same
+        // value, but reject typed/pasted
+        // insertions.
+        if (
+            newValue === displayedValue
+        ) {
+            return;
+        }
+    };
 
     // =========================================================
     // LOAD INTERVIEW
@@ -50,13 +344,15 @@ function Interview() {
 
                 const interviewData = await getInterview(
                     token,
-                    interviewId
+                    interviewId,
+                    logout
                 );
 
                 const questionData =
                     await getInterviewQuestions(
                         token,
-                        interviewId
+                        interviewId,
+                        logout
                     );
 
                 console.log(
@@ -92,7 +388,7 @@ function Interview() {
         if (token && interviewId) {
             loadInterview();
         }
-    }, [token, interviewId]);
+    }, [token, interviewId, logout]);
 
     // =========================================================
     // START INTERVIEW
@@ -105,7 +401,8 @@ function Interview() {
 
             const data = await startInterview(
                 token,
-                interviewId
+                interviewId,
+                logout
             );
 
             console.log(
@@ -134,7 +431,11 @@ function Interview() {
     // =========================================================
 
     const handleSubmitAnswer = async () => {
-        if (!answer.trim()) {
+        const finalAnswer = (
+            answer + interimTranscript
+        ).trim();
+
+        if (!finalAnswer) {
             setError(
                 "Please enter an answer before submitting."
             );
@@ -142,6 +443,11 @@ function Interview() {
         }
 
         try {
+            handleStopListening();
+
+            setAnswer(finalAnswer);
+            setInterimTranscript("");
+
             setSubmitting(true);
             setError("");
             setEvaluationError("");
@@ -155,7 +461,8 @@ function Interview() {
                 token,
                 interviewId,
                 currentQuestion.id,
-                answer.trim()
+                finalAnswer,
+                logout
             );
 
             console.log(
@@ -186,7 +493,8 @@ function Interview() {
                     await evaluateAnswer(
                         token,
                         interviewId,
-                        answerData.id
+                        answerData.id,
+                        logout
                     );
 
                 console.log(
@@ -271,7 +579,8 @@ function Interview() {
                 await evaluateAnswer(
                     token,
                     interviewId,
-                    answerData.id
+                    answerData.id,
+                    logout
                 );
 
             console.log(
@@ -312,8 +621,10 @@ function Interview() {
             );
 
             setAnswer("");
+            setInterimTranscript("");
             setError("");
             setEvaluationError("");
+            setSpeechError("");
 
             return;
         }
@@ -328,7 +639,8 @@ function Interview() {
 
             const data = await completeInterview(
                 token,
-                interviewId
+                interviewId,
+                logout
             );
 
             console.log(
@@ -351,6 +663,42 @@ function Interview() {
         }
     };
 
+
+    // =========================================================
+    // CURRENT QUESTION
+    // =========================================================
+
+    const currentQuestion =
+        questions[currentQuestionIndex];
+
+    // =========================================================
+    // READ QUESTION ALOUD
+    // =========================================================
+
+    useEffect(() => {
+        if (
+            interview?.status === "in_progress" &&
+            currentQuestion?.question_text
+        ) {
+            speakQuestion(currentQuestion.question_text);
+        }
+
+        return () => {
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current.currentTime = 0;
+            }
+
+            if (audioUrlRef.current) {
+                URL.revokeObjectURL(audioUrlRef.current);
+                audioUrlRef.current = null;
+            }
+        };
+    }, [
+        currentQuestionIndex,
+        interview?.status,
+        currentQuestion?.question_text,
+    ]);
     // =========================================================
     // LOADING STATE
     // =========================================================
@@ -457,8 +805,6 @@ function Interview() {
         );
     }
 
-    const currentQuestion =
-        questions[currentQuestionIndex];
 
     const totalQuestions =
         questions.length;
@@ -474,7 +820,7 @@ function Interview() {
     const currentSubmission =
         currentQuestion
             ? submittedAnswers[
-                currentQuestion.id
+            currentQuestion.id
             ]
             : null;
 
@@ -889,54 +1235,246 @@ function Interview() {
                                         Your Answer
                                     </label>
 
-                                    <textarea
-                                        value={answer}
-                                        onChange={(e) =>
-                                            setAnswer(
-                                                e.target.value
-                                            )
-                                        }
-                                        disabled={hasSubmitted}
-                                        placeholder="Explain your approach, reasoning, and answer..."
-                                        className="
-                                            w-full
-                                            min-h-[220px]
-                                            resize-y
-                                            rounded-xl
-                                            bg-[#0B1020]
-                                            border
-                                            border-[#293452]
-                                            px-5
-                                            py-4
-                                            text-sm
-                                            leading-7
-                                            text-[#D8DCE5]
-                                            placeholder:text-[#50596B]
-                                            outline-none
-                                            focus:border-[#6366F1]
-                                            focus:ring-1
-                                            focus:ring-[#6366F1]/20
-                                            disabled:opacity-70
-                                            disabled:cursor-not-allowed
-                                            transition
-                                        "
-                                    />
+                                    <div className="relative">
 
-                                    <div className="flex items-center justify-between mt-3">
+                                        <textarea
+                                            value={
+                                                answer +
+                                                interimTranscript
+                                            }
+                                            onChange={
+                                                handleAnswerChange
+                                            }
+                                            onPaste={(event) =>
+                                                event.preventDefault()
+                                            }
+                                            onDrop={(event) =>
+                                                event.preventDefault()
+                                            }
+                                            disabled={hasSubmitted}
+                                            placeholder={
+                                                speechSupported
+                                                    ? "Click Start Answer and speak your response..."
+                                                    : "Speech recognition is not supported in this browser."
+                                            }
+                                            className="
+                                                w-full
+                                                min-h-[220px]
+                                                resize-y
+                                                rounded-xl
+                                                bg-[#0B1020]
+                                                border
+                                                border-[#293452]
+                                                px-5
+                                                py-4
+                                                pr-5
+                                                text-sm
+                                                leading-7
+                                                text-[#D8DCE5]
+                                                placeholder:text-[#50596B]
+                                                outline-none
+                                                focus:border-[#6366F1]
+                                                focus:ring-1
+                                                focus:ring-[#6366F1]/20
+                                                disabled:opacity-70
+                                                disabled:cursor-not-allowed
+                                                transition
+                                            "
+                                        />
+
+                                        {isListening && (
+                                            <div
+                                                className="
+                                                    absolute
+                                                    top-4
+                                                    right-4
+                                                    inline-flex
+                                                    items-center
+                                                    gap-2
+                                                    px-3
+                                                    py-1.5
+                                                    rounded-full
+                                                    bg-red-500/10
+                                                    border
+                                                    border-red-500/20
+                                                "
+                                            >
+                                                <span className="relative flex w-2 h-2">
+                                                    <span className="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-75 animate-ping" />
+                                                    <span className="relative inline-flex w-2 h-2 rounded-full bg-red-400" />
+                                                </span>
+
+                                                <span className="text-[11px] font-medium text-red-400">
+                                                    Listening
+                                                </span>
+                                            </div>
+                                        )}
+
+                                    </div>
+
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3">
 
                                         <p className="text-xs text-[#5E687A]">
                                             {hasSubmitted
                                                 ? hasEvaluation
                                                     ? "Answer evaluated"
                                                     : "Answer submitted — evaluation pending"
-                                                : "Be clear and explain your reasoning."}
+                                                : isListening
+                                                    ? "Speak naturally. Your response will appear here automatically."
+                                                    : "Voice input only. You can delete or clear the transcript before submitting."}
                                         </p>
 
                                         <p className="text-xs text-[#5E687A]">
-                                            {answer.length} characters
+                                            {
+                                                (
+                                                    answer +
+                                                    interimTranscript
+                                                ).length
+                                            }{" "}
+                                            characters
                                         </p>
 
                                     </div>
+
+                                    {!hasSubmitted && (
+                                        <div className="flex flex-wrap items-center gap-3 mt-4">
+
+                                            {isListening ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={
+                                                        handleStopListening
+                                                    }
+                                                    className="
+                                                        inline-flex
+                                                        items-center
+                                                        gap-2
+                                                        px-4
+                                                        py-2.5
+                                                        rounded-xl
+                                                        bg-red-500/10
+                                                        border
+                                                        border-red-500/20
+                                                        text-red-400
+                                                        hover:bg-red-500/15
+                                                        transition
+                                                        text-sm
+                                                        font-medium
+                                                    "
+                                                >
+                                                    <span className="w-2 h-2 rounded-full bg-red-400" />
+                                                    Stop Answer
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={
+                                                        handleStartListening
+                                                    }
+                                                    disabled={
+                                                        !speechSupported ||
+                                                        submitting
+                                                    }
+                                                    className="
+                                                        inline-flex
+                                                        items-center
+                                                        gap-2
+                                                        px-4
+                                                        py-2.5
+                                                        rounded-xl
+                                                        bg-[#1E2540]
+                                                        border
+                                                        border-[#343D63]
+                                                        text-[#C4B5FD]
+                                                        hover:bg-[#252D4C]
+                                                        hover:border-[#46516E]
+                                                        disabled:opacity-40
+                                                        disabled:cursor-not-allowed
+                                                        transition
+                                                        text-sm
+                                                        font-medium
+                                                    "
+                                                >
+                                                    <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        viewBox="0 0 24 24"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        strokeWidth="1.8"
+                                                        className="w-4 h-4"
+                                                    >
+                                                        <rect
+                                                            x="7"
+                                                            y="3"
+                                                            width="10"
+                                                            height="14"
+                                                            rx="5"
+                                                        />
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            d="M5 11a7 7 0 0 0 14 0"
+                                                        />
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            d="M12 18v3"
+                                                        />
+                                                    </svg>
+
+                                                    Start Answer
+                                                </button>
+                                            )}
+
+                                            <button
+                                                type="button"
+                                                onClick={
+                                                    handleClearAnswer
+                                                }
+                                                disabled={
+                                                    !answer &&
+                                                    !interimTranscript
+                                                }
+                                                className="
+                                                    inline-flex
+                                                    items-center
+                                                    gap-2
+                                                    px-4
+                                                    py-2.5
+                                                    rounded-xl
+                                                    border
+                                                    border-[#293452]
+                                                    text-[#7F899C]
+                                                    hover:text-[#C7CBD5]
+                                                    hover:bg-[#151D33]
+                                                    disabled:opacity-30
+                                                    disabled:cursor-not-allowed
+                                                    transition
+                                                    text-sm
+                                                    font-medium
+                                                "
+                                            >
+                                                Clear
+                                            </button>
+
+                                        </div>
+                                    )}
+
+                                    {speechError && !hasSubmitted && (
+                                        <div
+                                            className="
+                                                mt-3
+                                                rounded-xl
+                                                border
+                                                border-red-500/15
+                                                bg-red-500/5
+                                                px-4
+                                                py-3
+                                            "
+                                        >
+                                            <p className="text-xs text-red-400">
+                                                {speechError}
+                                            </p>
+                                        </div>
+                                    )}
 
 
                                     {/* =====================================================
