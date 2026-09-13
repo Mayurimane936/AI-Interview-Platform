@@ -107,6 +107,18 @@ function Interview() {
     const [speechError, setSpeechError] =
         useState("");
 
+    const [answerMode, setAnswerMode] =
+        useState("type");
+
+    const [pasteWarningOpen, setPasteWarningOpen] =
+        useState(false);
+
+    const [pendingPastedValue, setPendingPastedValue] =
+        useState("");
+
+    const [answerWasPasted, setAnswerWasPasted] =
+        useState(false);
+
     const [interimTranscript, setInterimTranscript] =
         useState("");
 
@@ -264,7 +276,7 @@ function Interview() {
     // =========================================================
 
     const handleStartListening = async () => {
-        if (hasSubmitted || submitting) {
+        if (hasSubmitted || submitting || answerMode !== "speak") {
             return;
         }
 
@@ -571,39 +583,71 @@ function Interview() {
     };
 
     // =========================================================
-    // ANSWER TEXTAREA - DELETE ONLY
+    // ANSWER INPUT MODE
     // =========================================================
 
+    const handleAnswerModeChange = async (mode) => {
+        if (hasSubmitted || submitting || mode === answerMode) {
+            return;
+        }
+
+        if (isListening) {
+            await handleStopListening();
+        }
+
+        setAnswerMode(mode);
+        setInterimTranscript("");
+        setSpeechError("");
+        setSilencePromptOpen(false);
+    };
+
     const handleAnswerChange = (event) => {
-        if (hasSubmitted) {
+        if (hasSubmitted || answerMode !== "type") {
             return;
         }
 
-        const newValue =
-            event.target.value;
+        setAnswer(event.target.value);
+        setError("");
+    };
 
-        const displayedValue =
-            answer + interimTranscript;
-
-        // Only allow the value to become
-        // shorter. This prevents normal typing.
-        if (
-            newValue.length <
-            displayedValue.length
-        ) {
-            setAnswer(newValue);
-            setInterimTranscript("");
+    const handleAnswerPaste = (event) => {
+        if (hasSubmitted || answerMode !== "type") {
             return;
         }
 
-        // Allow React to keep the exact same
-        // value, but reject typed/pasted
-        // insertions.
-        if (
-            newValue === displayedValue
-        ) {
-            return;
-        }
+        event.preventDefault();
+
+        const pastedText = event.clipboardData?.getData("text") || "";
+        if (!pastedText) return;
+
+        const textarea = event.currentTarget;
+        const currentValue = answer;
+        const selectionStart = textarea.selectionStart ?? currentValue.length;
+        const selectionEnd = textarea.selectionEnd ?? currentValue.length;
+
+        const nextValue =
+            currentValue.slice(0, selectionStart) +
+            pastedText +
+            currentValue.slice(selectionEnd);
+
+        setPendingPastedValue(nextValue);
+        setPasteWarningOpen(true);
+    };
+
+    const handlePasteCancel = () => {
+        setPasteWarningOpen(false);
+        setPendingPastedValue("");
+        setAnswer("");
+        setInterimTranscript("");
+        setAnswerWasPasted(false);
+    };
+
+    const handlePasteContinue = () => {
+        setAnswer(pendingPastedValue);
+        setAnswerWasPasted(true);
+        setPasteWarningOpen(false);
+        setPendingPastedValue("");
+        setError("");
     };
 
     // =========================================================
@@ -896,6 +940,9 @@ function Interview() {
 
             setAnswer("");
             setInterimTranscript("");
+            setAnswerWasPasted(false);
+            setPasteWarningOpen(false);
+            setPendingPastedValue("");
             setError("");
             setEvaluationError("");
             setSpeechError("");
@@ -1343,6 +1390,55 @@ function Interview() {
                                     you're ready.
                                 </p>
 
+                                <button
+                                    type="button"
+                                    onClick={speakWelcome}
+                                    className="
+                                        inline-flex
+                                        items-center
+                                        gap-2
+                                        mt-5
+                                        px-4
+                                        py-2.5
+                                        rounded-xl
+                                        bg-[#1E2540]
+                                        border
+                                        border-[#343D63]
+                                        text-[#C4B5FD]
+                                        hover:bg-[#252D4C]
+                                        hover:border-[#46516E]
+                                        text-sm
+                                        font-medium
+                                        transition
+                                    "
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.8"
+                                        className="w-4 h-4"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            d="M11 5L6 9H3v6h3l5 4V5z"
+                                        />
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            d="M15.5 8.5a5 5 0 010 7"
+                                        />
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            d="M18 6a9 9 0 010 12"
+                                        />
+                                    </svg>
+                                    Hear introduction again
+                                </button>
+
                                 <div className="grid grid-cols-2 gap-3 mt-7">
 
                                     <div className="bg-[#0B1020] border border-[#252F4A] rounded-xl p-4">
@@ -1605,31 +1701,66 @@ function Interview() {
 
                                 <div className="px-7 pb-7">
 
-                                    <label className="block text-sm font-medium text-[#AEB5C3] mb-3">
-                                        Your Answer
-                                    </label>
+                                    <div className="flex items-center justify-between gap-4 mb-3">
+
+                                        <label className="block text-sm font-medium text-[#AEB5C3]">
+                                            Your Answer
+                                        </label>
+
+                                        {!hasSubmitted && (
+                                            <div className="inline-flex items-center p-1 rounded-xl bg-[#0B1020] border border-[#293452]">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleAnswerModeChange("type")}
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                                                        answerMode === "type"
+                                                            ? "bg-[#1E2540] text-[#C4B5FD]"
+                                                            : "text-[#737C8E] hover:text-[#C7CBD5]"
+                                                    }`}
+                                                >
+                                                    ⌨ Type
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleAnswerModeChange("speak")}
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                                                        answerMode === "speak"
+                                                            ? "bg-[#1E2540] text-[#C4B5FD]"
+                                                            : "text-[#737C8E] hover:text-[#C7CBD5]"
+                                                    }`}
+                                                >
+                                                    🎙 Speak
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {answerMode === "speak" && !hasSubmitted && (
+                                        <p className="text-xs text-[#687184] mb-3">
+                                            Speak your answer naturally. Azure will transcribe your response in real time.
+                                        </p>
+                                    )}
+
+                                    {answerMode === "type" && answerWasPasted && !hasSubmitted && (
+                                        <div className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+                                            <p className="text-xs text-amber-300">
+                                                This answer contains pasted content. Pasted answers may impact your interview score.
+                                            </p>
+                                        </div>
+                                    )}
 
                                     <div className="relative">
 
                                         <textarea
-                                            value={
-                                                answer +
-                                                interimTranscript
-                                            }
-                                            onChange={
-                                                handleAnswerChange
-                                            }
-                                            onPaste={(event) =>
-                                                event.preventDefault()
-                                            }
-                                            onDrop={(event) =>
-                                                event.preventDefault()
-                                            }
+                                            value={answer + (answerMode === "speak" ? interimTranscript : "")}
+                                            onChange={handleAnswerChange}
+                                            onPaste={handleAnswerPaste}
+                                            onDrop={(event) => event.preventDefault()}
                                             disabled={hasSubmitted}
                                             placeholder={
-                                                speechSupported
+                                                answerMode === "speak"
                                                     ? "Click Start Answer and speak your response..."
-                                                    : "Speech recognition is not supported in this browser."
+                                                    : "Type your answer here..."
                                             }
                                             className="
                                                 w-full
@@ -1641,7 +1772,6 @@ function Interview() {
                                                 border-[#293452]
                                                 px-5
                                                 py-4
-                                                pr-5
                                                 text-sm
                                                 leading-7
                                                 text-[#D8DCE5]
@@ -1656,31 +1786,13 @@ function Interview() {
                                             "
                                         />
 
-                                        {isListening && (
-                                            <div
-                                                className="
-                                                    absolute
-                                                    top-4
-                                                    right-4
-                                                    inline-flex
-                                                    items-center
-                                                    gap-2
-                                                    px-3
-                                                    py-1.5
-                                                    rounded-full
-                                                    bg-red-500/10
-                                                    border
-                                                    border-red-500/20
-                                                "
-                                            >
+                                        {isListening && answerMode === "speak" && (
+                                            <div className="absolute top-4 right-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20">
                                                 <span className="relative flex w-2 h-2">
                                                     <span className="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-75 animate-ping" />
                                                     <span className="relative inline-flex w-2 h-2 rounded-full bg-red-400" />
                                                 </span>
-
-                                                <span className="text-[11px] font-medium text-red-400">
-                                                    Listening
-                                                </span>
+                                                <span className="text-[11px] font-medium text-red-400">Listening</span>
                                             </div>
                                         )}
 
@@ -1693,142 +1805,44 @@ function Interview() {
                                                 ? hasEvaluation
                                                     ? "Answer evaluated"
                                                     : "Answer submitted — evaluation pending"
-                                                : isListening
-                                                    ? "Speak naturally. Your response will appear here automatically."
-                                                    : "Voice input only. You can delete or clear the transcript before submitting."}
+                                                : answerMode === "speak"
+                                                    ? isListening
+                                                        ? "Speak naturally. Your response will appear here automatically."
+                                                        : "Voice mode: click Start Answer to begin speaking."
+                                                    : "Type your answer. Pasting is allowed only after you review the warning."}
                                         </p>
 
                                         <p className="text-xs text-[#5E687A]">
-                                            {
-                                                (
-                                                    answer +
-                                                    interimTranscript
-                                                ).length
-                                            }{" "}
+                                            {(answer + (answerMode === "speak" ? interimTranscript : "")).length}{" "}
                                             characters
                                         </p>
 
                                     </div>
 
-                                    {!hasSubmitted && (
+                                    {answerMode === "speak" && !hasSubmitted && (
                                         <div className="flex flex-wrap items-center gap-3 mt-4">
-
                                             {isListening ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={
-                                                        handleStopListening
-                                                    }
-                                                    className="
-                                                        inline-flex
-                                                        items-center
-                                                        gap-2
-                                                        px-4
-                                                        py-2.5
-                                                        rounded-xl
-                                                        bg-red-500/10
-                                                        border
-                                                        border-red-500/20
-                                                        text-red-400
-                                                        hover:bg-red-500/15
-                                                        transition
-                                                        text-sm
-                                                        font-medium
-                                                    "
-                                                >
+                                                <button type="button" onClick={handleStopListening} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/15 transition text-sm font-medium">
                                                     <span className="w-2 h-2 rounded-full bg-red-400" />
                                                     Finish Answer
                                                 </button>
                                             ) : (
-                                                <button
-                                                    type="button"
-                                                    onClick={
-                                                        handleStartListening
-                                                    }
-                                                    disabled={
-                                                        !speechSupported ||
-                                                        submitting
-                                                    }
-                                                    className="
-                                                        inline-flex
-                                                        items-center
-                                                        gap-2
-                                                        px-4
-                                                        py-2.5
-                                                        rounded-xl
-                                                        bg-[#1E2540]
-                                                        border
-                                                        border-[#343D63]
-                                                        text-[#C4B5FD]
-                                                        hover:bg-[#252D4C]
-                                                        hover:border-[#46516E]
-                                                        disabled:opacity-40
-                                                        disabled:cursor-not-allowed
-                                                        transition
-                                                        text-sm
-                                                        font-medium
-                                                    "
-                                                >
-                                                    <svg
-                                                        xmlns="http://www.w3.org/2000/svg"
-                                                        viewBox="0 0 24 24"
-                                                        fill="none"
-                                                        stroke="currentColor"
-                                                        strokeWidth="1.8"
-                                                        className="w-4 h-4"
-                                                    >
-                                                        <rect
-                                                            x="7"
-                                                            y="3"
-                                                            width="10"
-                                                            height="14"
-                                                            rx="5"
-                                                        />
-                                                        <path
-                                                            strokeLinecap="round"
-                                                            d="M5 11a7 7 0 0 0 14 0"
-                                                        />
-                                                        <path
-                                                            strokeLinecap="round"
-                                                            d="M12 18v3"
-                                                        />
-                                                    </svg>
-
+                                                <button type="button" onClick={handleStartListening} disabled={!speechSupported || submitting} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#1E2540] border border-[#343D63] text-[#C4B5FD] hover:bg-[#252D4C] hover:border-[#46516E] disabled:opacity-40 disabled:cursor-not-allowed transition text-sm font-medium">
+                                                    <span>🎙</span>
                                                     Start Answer
                                                 </button>
                                             )}
-
-                                            <button
-                                                type="button"
-                                                onClick={
-                                                    handleClearAnswer
-                                                }
-                                                disabled={
-                                                    !answer &&
-                                                    !interimTranscript
-                                                }
-                                                className="
-                                                    inline-flex
-                                                    items-center
-                                                    gap-2
-                                                    px-4
-                                                    py-2.5
-                                                    rounded-xl
-                                                    border
-                                                    border-[#293452]
-                                                    text-[#7F899C]
-                                                    hover:text-[#C7CBD5]
-                                                    hover:bg-[#151D33]
-                                                    disabled:opacity-30
-                                                    disabled:cursor-not-allowed
-                                                    transition
-                                                    text-sm
-                                                    font-medium
-                                                "
-                                            >
+                                            <button type="button" onClick={handleClearAnswer} disabled={!answer && !interimTranscript} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#293452] text-[#7F899C] hover:text-[#C7CBD5] hover:bg-[#151D33] disabled:opacity-30 disabled:cursor-not-allowed transition text-sm font-medium">
                                                 Clear
                                             </button>
+                                        </div>
+                                    )}
 
+                                    {answerMode === "type" && !hasSubmitted && (
+                                        <div className="flex justify-end mt-4">
+                                            <button type="button" onClick={handleClearAnswer} disabled={!answer} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#293452] text-[#7F899C] hover:text-[#C7CBD5] hover:bg-[#151D33] disabled:opacity-30 disabled:cursor-not-allowed transition text-sm font-medium">
+                                                Clear
+                                            </button>
                                         </div>
                                     )}
 
@@ -2245,6 +2259,44 @@ function Interview() {
                     )}
 
             </main>
+
+
+            {/* =========================================================
+                PASTE WARNING POPUP
+            ========================================================== */}
+
+            {pasteWarningOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 bg-black/60 backdrop-blur-sm">
+                    <div className="w-full max-w-md bg-[#11182B] border border-[#252F4A] rounded-2xl shadow-2xl p-7">
+                        <div className="flex items-start gap-4">
+                            <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                                <span className="text-amber-400 text-xl">!</span>
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-semibold text-[#E5E7EB]">Pasted Answer Detected</h3>
+                                <p className="text-sm text-[#9CA3AF] mt-2 leading-6">
+                                    We noticed that you pasted content into your answer. Pasted or externally prepared answers may affect your score because this interview is designed to evaluate your own reasoning and understanding.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mt-5 rounded-xl bg-[#0B1020] border border-[#252F4A] p-4">
+                            <p className="text-xs text-[#70798B] leading-5">
+                                Choose Clear Answer to remove it, or Continue Anyway to keep the pasted content.
+                            </p>
+                        </div>
+
+                        <div className="flex justify-end gap-3 mt-6">
+                            <button type="button" onClick={handlePasteCancel} className="px-5 py-2.5 rounded-xl border border-[#293452] text-[#9CA3AF] hover:text-[#E5E7EB] hover:bg-[#151D33] text-sm font-medium transition">
+                                Clear Answer
+                            </button>
+                            <button type="button" onClick={handlePasteContinue} className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#7073F5] hover:to-[#9568F8] text-white font-semibold text-sm transition">
+                                Continue Anyway
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
 
             {/* =========================================================
