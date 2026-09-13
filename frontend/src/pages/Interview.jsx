@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import * as SpeechSDK from "microsoft-cognitiveservices-speech-sdk";
 
 import { useAuth } from "../context/AuthContext";
 import { synthesizeSpeech } from "../api/speech";
-import { transcribeAudio } from "../api/stt";
+import { getSpeechToken } from "../api/stt";
 
 import {
     getInterview,
@@ -32,20 +33,17 @@ function Interview() {
         }
 
         try {
-            // Stop previous audio
             if (audioRef.current) {
                 audioRef.current.pause();
                 audioRef.current.currentTime = 0;
             }
 
-            // Release previous object URL
             if (audioUrlRef.current) {
                 URL.revokeObjectURL(audioUrlRef.current);
                 audioUrlRef.current = null;
             }
 
             const audioUrl = await synthesizeSpeech(text);
-
             audioUrlRef.current = audioUrl;
 
             const audio = new Audio(audioUrl);
@@ -91,199 +89,337 @@ function Interview() {
     const [interimTranscript, setInterimTranscript] =
         useState("");
 
-    const mediaRecorderRef = useRef(null);
-    const audioChunksRef = useRef([]);
-    const mediaStreamRef = useRef(null);
+    const speechRecognizerRef = useRef(null);
+    const speechTokenRef = useRef(null);
 
     const [submittedAnswers, setSubmittedAnswers] =
         useState({});
 
+    useEffect(() => {
+        return () => {
+            const recognizer =
+                speechRecognizerRef.current;
+
+            speechRecognizerRef.current = null;
+            speechTokenRef.current = null;
+
+            if (recognizer) {
+                try {
+                    recognizer.stopContinuousRecognitionAsync(
+                        () => {},
+                        () => {}
+                    );
+                } catch {
+                    // Already stopped.
+                }
+
+                try {
+                    recognizer.close();
+                } catch {
+                    // Already closed.
+                }
+            }
+        };
+    }, []);
+
     // =========================================================
-    // SPEECH RECOGNITION SETUP
+    // AZURE SPEECH RECOGNITION
     // =========================================================
 
+    const cleanupSpeechRecognizer = async () => {
+        const recognizer = speechRecognizerRef.current;
+
+        if (!recognizer) {
+            setIsListening(false);
+            setInterimTranscript("");
+            return;
+        }
+
+        speechRecognizerRef.current = null;
+        speechTokenRef.current = null;
+
+        try {
+            await new Promise((resolve) => {
+                recognizer.stopContinuousRecognitionAsync(
+                    () => resolve(),
+                    () => resolve()
+                );
+            });
+        } catch (error) {
+            console.error(
+                "AZURE STT STOP ERROR:",
+                error
+            );
+        }
+
+        try {
+            recognizer.close();
+        } catch {
+            // Recognizer may already be closed.
+        }
+
+        setIsListening(false);
+        setInterimTranscript("");
+    };
 
     // Stop speech recognition whenever
     // the user moves to another question.
     useEffect(() => {
-        if (mediaRecorderRef.current) {
-            try {
-                if (
-                    mediaRecorderRef.current.state !==
-                    "inactive"
-                ) {
-                    mediaRecorderRef.current.stop();
-                }
-            } catch (error) {
-                console.error(
-                    "RECORDER STOP ERROR:",
-                    error
-                );
-            }
-
-            mediaRecorderRef.current = null;
+        if (speechRecognizerRef.current) {
+            cleanupSpeechRecognizer();
         }
 
-        if (mediaStreamRef.current) {
-            mediaStreamRef.current
-                .getTracks()
-                .forEach((track) => track.stop());
-
-            mediaStreamRef.current = null;
-        }
-
-        audioChunksRef.current = [];
-
-        setIsListening(false);
         setInterimTranscript("");
         setSpeechError("");
     }, [currentQuestionIndex]);
+
     // =========================================================
     // START / STOP VOICE INPUT
     // =========================================================
+
     const handleStartListening = async () => {
         if (hasSubmitted || submitting) {
             return;
         }
 
-        if (!navigator.mediaDevices?.getUserMedia) {
-            setSpeechSupported(false);
-            setSpeechError(
-                "Microphone recording is not supported in this browser."
-            );
+        if (speechRecognizerRef.current) {
             return;
         }
 
         try {
             setSpeechError("");
+            setInterimTranscript("");
 
-            const stream =
-                await navigator.mediaDevices.getUserMedia({
-                    audio: true,
-                });
+            const speechAuth = await getSpeechToken();
 
-            mediaStreamRef.current = stream;
-            audioChunksRef.current = [];
+            if (!speechAuth?.token || !speechAuth?.region) {
+                throw new Error(
+                    "Unable to get Azure Speech authorization."
+                );
+            }
 
-            const mediaRecorder =
-                new MediaRecorder(stream);
+            speechTokenRef.current = speechAuth.token;
 
-            mediaRecorderRef.current =
-                mediaRecorder;
+            const speechConfig =
+                SpeechSDK.SpeechConfig.fromAuthorizationToken(
+                    speechAuth.token,
+                    speechAuth.region
+                );
 
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    audioChunksRef.current.push(
-                        event.data
+            speechConfig.speechRecognitionLanguage =
+                "en-US";
+
+            const audioConfig =
+                SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+
+            const recognizer =
+                new SpeechSDK.SpeechRecognizer(
+                    speechConfig,
+                    audioConfig
+                );
+
+            speechRecognizerRef.current = recognizer;
+
+            recognizer.recognizing = (
+                _sender,
+                event
+            ) => {
+                if (
+                    speechRecognizerRef.current !==
+                    recognizer
+                ) {
+                    return;
+                }
+
+                if (event.result?.text) {
+                    setInterimTranscript(
+                        event.result.text
                     );
                 }
             };
 
-            mediaRecorder.onstart = () => {
-                setIsListening(true);
+            recognizer.recognized = (
+                _sender,
+                event
+            ) => {
+                if (
+                    speechRecognizerRef.current !==
+                    recognizer
+                ) {
+                    return;
+                }
+
+                if (
+                    event.result?.reason ===
+                    SpeechSDK.ResultReason.RecognizedSpeech
+                ) {
+                    const finalText =
+                        event.result.text?.trim();
+
+                    if (finalText) {
+                        setAnswer((previous) => {
+                            const separator =
+                                previous &&
+                                !previous.endsWith(" ")
+                                    ? " "
+                                    : "";
+
+                            return (
+                                previous +
+                                separator +
+                                finalText
+                            );
+                        });
+                    }
+
+                    setInterimTranscript("");
+                }
             };
 
-            mediaRecorder.start();
+            recognizer.canceled = (
+                _sender,
+                event
+            ) => {
+                console.error(
+                    "AZURE STT CANCELED:",
+                    event.reason,
+                    event.errorDetails
+                );
+
+                if (
+                    speechRecognizerRef.current !==
+                    recognizer
+                ) {
+                    return;
+                }
+
+                setSpeechError(
+                    event.errorDetails ||
+                        "Azure Speech recognition was canceled."
+                );
+
+                speechRecognizerRef.current = null;
+                speechTokenRef.current = null;
+
+                try {
+                    recognizer.close();
+                } catch {
+                    // Already closed.
+                }
+
+                setIsListening(false);
+                setInterimTranscript("");
+            };
+
+            recognizer.sessionStopped = (
+                _sender,
+                _event
+            ) => {
+                if (
+                    speechRecognizerRef.current ===
+                    recognizer
+                ) {
+                    setIsListening(false);
+                }
+            };
+
+            await new Promise((resolve, reject) => {
+                recognizer.startContinuousRecognitionAsync(
+                    () => {
+                        setIsListening(true);
+                        resolve();
+                    },
+                    (error) => {
+                        reject(
+                            new Error(
+                                String(error)
+                            )
+                        );
+                    }
+                );
+            });
 
         } catch (error) {
             console.error(
-                "MICROPHONE START ERROR:",
+                "AZURE STT START ERROR:",
                 error
             );
 
-            setIsListening(false);
+            if (speechRecognizerRef.current) {
+                try {
+                    speechRecognizerRef.current.close();
+                } catch {
+                    // Already closed.
+                }
+            }
 
-            if (error.name === "NotAllowedError") {
+            speechRecognizerRef.current = null;
+            speechTokenRef.current = null;
+
+            setIsListening(false);
+            setInterimTranscript("");
+
+            if (
+                error?.name ===
+                "NotAllowedError"
+            ) {
                 setSpeechError(
                     "Microphone permission was denied. Please allow microphone access in your browser."
                 );
             } else {
                 setSpeechError(
-                    "Unable to access your microphone. Please try again."
+                    error?.message ||
+                        "Unable to start Azure Speech recognition. Please try again."
                 );
             }
         }
     };
 
-    const handleStopListening = () => {
-        const mediaRecorder = mediaRecorderRef.current;
+    const handleStopListening = async () => {
+        const recognizer =
+            speechRecognizerRef.current;
 
-        if (!mediaRecorder) {
+        if (!recognizer) {
+            setIsListening(false);
+            setInterimTranscript("");
             return;
         }
 
-        mediaRecorder.onstop = async () => {
-            setIsListening(false);
+        speechRecognizerRef.current = null;
+        speechTokenRef.current = null;
 
-            if (mediaStreamRef.current) {
-                mediaStreamRef.current
-                    .getTracks()
-                    .forEach((track) => track.stop());
-
-                mediaStreamRef.current = null;
-            }
-
-            const audioBlob = new Blob(
-                audioChunksRef.current,
-                {
-                    type: "audio/webm",
-                }
+        try {
+            await new Promise((resolve, reject) => {
+                recognizer.stopContinuousRecognitionAsync(
+                    () => resolve(),
+                    (error) =>
+                        reject(
+                            new Error(
+                                String(error)
+                            )
+                        )
+                );
+            });
+        } catch (error) {
+            console.error(
+                "AZURE STT STOP ERROR:",
+                error
             );
 
-            audioChunksRef.current = [];
-
-            if (!audioBlob.size) {
-                setSpeechError(
-                    "No audio was recorded. Please try again."
-                );
-                return;
-            }
-
+            setSpeechError(
+                error?.message ||
+                    "Unable to stop speech recognition cleanly."
+            );
+        } finally {
             try {
-                setSpeechError("");
-
-                const data =
-                    await transcribeAudio(audioBlob);
-
-                const transcript =
-                    data?.transcript?.trim();
-
-                if (!transcript) {
-                    setSpeechError(
-                        "No speech was recognized. Please try again."
-                    );
-                    return;
-                }
-
-                setAnswer((previous) => {
-                    const separator =
-                        previous &&
-                            !previous.endsWith(" ")
-                            ? " "
-                            : "";
-
-                    return (
-                        previous +
-                        separator +
-                        transcript
-                    );
-                });
-
-            } catch (error) {
-                console.error(
-                    "AZURE STT ERROR:",
-                    error
-                );
-
-                setSpeechError(
-                    error.message ||
-                    "Unable to transcribe your answer. Please try again."
-                );
+                recognizer.close();
+            } catch {
+                // Already closed.
             }
-        };
 
-        mediaRecorder.stop();
-        mediaRecorderRef.current = null;
+            setIsListening(false);
+            setInterimTranscript("");
+        }
     };
 
     const handleClearAnswer = () => {
@@ -431,9 +567,11 @@ function Interview() {
     // =========================================================
 
     const handleSubmitAnswer = async () => {
-        const finalAnswer = (
-            answer + interimTranscript
-        ).trim();
+        if (speechRecognizerRef.current) {
+            await handleStopListening();
+        }
+
+        const finalAnswer = answer.trim();
 
         if (!finalAnswer) {
             setError(
@@ -443,8 +581,6 @@ function Interview() {
         }
 
         try {
-            handleStopListening();
-
             setAnswer(finalAnswer);
             setInterimTranscript("");
 
@@ -699,6 +835,7 @@ function Interview() {
         interview?.status,
         currentQuestion?.question_text,
     ]);
+
     // =========================================================
     // LOADING STATE
     // =========================================================
@@ -1743,6 +1880,7 @@ function Interview() {
                                             }
                                             disabled={
                                                 submitting ||
+                                                isListening ||
                                                 !answer.trim()
                                             }
                                             className="

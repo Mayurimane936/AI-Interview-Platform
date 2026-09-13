@@ -28,3 +28,26 @@ export async function transcribeAudio(audioBlob) {
 
     return response.json();
 }
+
+
+
+export async function getSpeechToken() {
+    const response = await fetch(
+        `${API_URL}/stt/token`
+    );
+
+    if (!response.ok) {
+        let message = "Failed to get Azure Speech token.";
+
+        try {
+            const data = await response.json();
+            message = data?.detail || message;
+        } catch {
+            // Response was not JSON.
+        }
+
+        throw new Error(message);
+    }
+
+    return response.json();
+}
