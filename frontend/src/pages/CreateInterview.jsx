@@ -17,6 +17,12 @@ function CreateInterview() {
     const categoryFromUrl =
         searchParams.get("category");
 
+    const topicFromUrl =
+        searchParams.get("topic");
+
+    const difficultyFromUrl =
+        searchParams.get("difficulty");
+
     // ==========================================
     // CATEGORY STATE
     // ==========================================
@@ -53,13 +59,22 @@ function CreateInterview() {
     // ==========================================
 
     const [difficulty, setDifficulty] =
-        useState("medium");
+        useState(
+            ["easy", "medium", "hard"].includes(
+                difficultyFromUrl
+            )
+                ? difficultyFromUrl
+                : "medium"
+        );
 
     const [loading, setLoading] =
         useState(false);
 
     const [error, setError] =
         useState("");
+
+    const [recentPractice, setRecentPractice] = useState([]);
+    const [recentPracticeLoading, setRecentPracticeLoading] = useState(true);
 
     // ==========================================
     // LOAD CATEGORIES
@@ -106,6 +121,56 @@ function CreateInterview() {
     }, []);
 
     // ==========================================
+    // LOAD RECENT PRACTICE
+    // ==========================================
+
+    useEffect(() => {
+        const loadRecentPractice = async () => {
+            if (!token) {
+                setRecentPracticeLoading(false);
+                return;
+            }
+
+            try {
+                setRecentPracticeLoading(true);
+
+                const response = await fetch(
+                    `${API_URL}/dashboard/recent-practice`,
+                    {
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                        },
+                    }
+                );
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.detail ||
+                        "Failed to load recent practice"
+                    );
+                }
+
+                setRecentPractice(
+                    data.recent_practice || []
+                );
+            } catch (err) {
+                console.error(
+                    "RECENT PRACTICE LOAD ERROR:",
+                    err
+                );
+
+                setRecentPractice([]);
+            } finally {
+                setRecentPracticeLoading(false);
+            }
+        };
+
+        loadRecentPractice();
+    }, [token]);
+
+    // ==========================================
     // SET CATEGORY FROM URL
     // ==========================================
 
@@ -131,6 +196,19 @@ function CreateInterview() {
     ]);
 
     // ==========================================
+    // LOAD TOPIC FROM URL
+    // ==========================================
+
+    useEffect(() => {
+        if (topicFromUrl && category) {
+            setTopic(topicFromUrl);
+            setTopicSearch(topicFromUrl);
+            setTopics([]);
+            setShowTopicResults(false);
+        }
+    }, [topicFromUrl, category]);
+
+    // ==========================================
     // LOAD TOPICS ONLY AFTER USER TYPES
     // ==========================================
 
@@ -144,6 +222,15 @@ function CreateInterview() {
 
         const searchValue =
             topicSearch.trim();
+
+        // A topic loaded from a recent-practice shortcut is already
+        // selected, so do not reopen the search results.
+        if (topic && topic.trim() === searchValue) {
+            setTopics([]);
+            setTopicsLoading(false);
+            setShowTopicResults(false);
+            return;
+        }
 
         // Do NOT show all topics when search is empty.
         if (!searchValue) {
@@ -267,6 +354,35 @@ function CreateInterview() {
     };
 
     // ==========================================
+    // RECENT PRACTICE
+    // ==========================================
+
+    const handleRecentPractice = (item) => {
+        if (!item?.topic) {
+            return;
+        }
+
+        // Recent-practice records include the catalogue category so
+        // we can preselect both category and topic without searching.
+        if (!item.category) {
+            setError(
+                "This recent topic could not be linked to a category. Please search for it instead."
+            );
+            return;
+        }
+
+        const params = new URLSearchParams();
+        params.set("category", item.category);
+        params.set("topic", item.topic);
+
+        if (item.difficulty) {
+            params.set("difficulty", item.difficulty);
+        }
+
+        navigate(`/create-interview?${params.toString()}`);
+    };
+
+    // ==========================================
     // CREATE INTERVIEW
     // ==========================================
 
@@ -381,8 +497,7 @@ function CreateInterview() {
         quickPracticeKeys
             .map((key) =>
                 categories.find(
-                    (item) =>
-                        item.value === key
+                    (item) => item.value === key
                 )
             )
             .filter(Boolean);
@@ -390,6 +505,7 @@ function CreateInterview() {
     // ==========================================
     // UI
     // ==========================================
+
 
     return (
         <div className="min-h-screen bg-[#0B1020] text-[#E5E7EB]">
@@ -520,99 +636,156 @@ function CreateInterview() {
                 {!category && (
                     <section className="mb-8">
 
-                        <div className="mb-4">
+                        {/* POPULAR PRACTICE */}
 
+                        <div className="mb-4">
                             <h3 className="text-lg font-semibold text-[#DDE1E9]">
-                                Quick Practice
+                                Popular Practice
                             </h3>
 
                             <p className="text-sm text-[#70798B] mt-1">
                                 Start with one of the most common interview areas.
                             </p>
-
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {quickPracticeCategories.map((item) => {
 
-                            {quickPracticeCategories.map(
-                                (item) => {
+                                const initials =
+                                    item.label
+                                        .split(" ")
+                                        .map((word) => word[0])
+                                        .join("")
+                                        .slice(0, 2)
+                                        .toUpperCase();
 
-                                    const initials =
-                                        item.label
-                                            .split(" ")
-                                            .map(
-                                                (word) =>
-                                                    word[0]
-                                            )
-                                            .join("")
-                                            .slice(
-                                                0,
-                                                2
-                                            )
-                                            .toUpperCase();
+                                return (
+                                    <button
+                                        key={item.value}
+                                        type="button"
+                                        onClick={() =>
+                                            handleCategorySelect(item.value)
+                                        }
+                                        className="
+                                            text-left
+                                            rounded-2xl
+                                            border
+                                            border-[#252F4A]
+                                            bg-[#11182B]
+                                            p-6
+                                            hover:border-[#3B4770]
+                                            hover:bg-[#141C32]
+                                            transition
+                                        "
+                                    >
+                                        <div className="flex items-center justify-between mb-5">
 
-                                    return (
+                                            <div
+                                                className="
+                                                    w-11
+                                                    h-11
+                                                    rounded-xl
+                                                    bg-[#1A2138]
+                                                    border
+                                                    border-[#2B3554]
+                                                    flex
+                                                    items-center
+                                                    justify-center
+                                                "
+                                            >
+                                                <span className="text-[#A78BFA] font-bold text-xs">
+                                                    {initials}
+                                                </span>
+                                            </div>
+
+                                            <span className="text-[#4B5563] text-lg">
+                                                →
+                                            </span>
+
+                                        </div>
+
+                                        <h4 className="text-base font-semibold text-[#D8DCE5]">
+                                            {item.label}
+                                        </h4>
+
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        {/* RECENTLY PRACTICED */}
+
+                        {recentPractice.length > 0 && (
+                            <div className="mt-8">
+
+                                <div className="mb-4">
+                                    <h3 className="text-lg font-semibold text-[#DDE1E9]">
+                                        Recently Practiced
+                                    </h3>
+
+                                    <p className="text-sm text-[#70798B] mt-1">
+                                        Jump back into a topic you recently practiced.
+                                    </p>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {recentPractice.map((item) => (
                                         <button
-                                            key={
-                                                item.value
-                                            }
+                                            key={item.interview_id}
                                             type="button"
                                             onClick={() =>
-                                                handleCategorySelect(
-                                                    item.value
-                                                )
+                                                handleRecentPractice(item)
                                             }
+                                            title={`Practice ${item.topic} again`}
                                             className="
+                                                w-full
                                                 text-left
-                                                rounded-2xl
+                                                rounded-xl
                                                 border
                                                 border-[#252F4A]
                                                 bg-[#11182B]
-                                                p-6
-                                                hover:border-[#3B4770]
+                                                px-4
+                                                py-4
+                                                flex
+                                                items-center
+                                                justify-between
+                                                gap-4
+                                                hover:border-[#6366F1]
                                                 hover:bg-[#141C32]
                                                 transition
+                                                group
                                             "
                                         >
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-[#D8DCE5] truncate capitalize group-hover:text-[#E5E7EB]">
+                                                    {item.topic}
+                                                </p>
 
-                                            <div className="flex items-center justify-between mb-5">
-
-                                                <div
-                                                    className="
-                                                        w-11
-                                                        h-11
-                                                        rounded-xl
-                                                        bg-[#1A2138]
-                                                        border
-                                                        border-[#2B3554]
-                                                        flex
-                                                        items-center
-                                                        justify-center
-                                                    "
-                                                >
-                                                    <span className="text-[#A78BFA] font-bold text-xs">
-                                                        {initials}
-                                                    </span>
-                                                </div>
-
-                                                <span className="text-[#4B5563] text-lg">
-                                                    →
-                                                </span>
-
+                                                <p className="text-xs text-[#687184] mt-1 capitalize">
+                                                    {item.categoryLabel || item.category || "Technical practice"}
+                                                    {item.difficulty ? ` · ${item.difficulty}` : ""}
+                                                </p>
                                             </div>
 
-                                            <h4 className="text-base font-semibold text-[#D8DCE5]">
-                                                {
-                                                    item.label
-                                                }
-                                            </h4>
-
+                                            <span className="text-xs text-[#8B5CF6] shrink-0 flex items-center gap-1">
+                                                Practice again
+                                                <span className="text-[#6366F1]">
+                                                    →
+                                                </span>
+                                            </span>
                                         </button>
-                                    );
-                                }
-                            )}
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
-                        </div>
+                        {recentPracticeLoading && (
+                            <div className="mt-8">
+                                <p className="text-sm text-[#687184]">
+                                    Loading recent practice...
+                                </p>
+                            </div>
+                        )}
 
                     </section>
                 )}
@@ -931,7 +1104,7 @@ function CreateInterview() {
                                     >
 
                                         {topics.length >
-                                        0 ? (
+                                            0 ? (
 
                                             <div className="max-h-72 overflow-y-auto py-2">
 
@@ -965,10 +1138,9 @@ function CreateInterview() {
                                                                     justify-between
                                                                     gap-4
                                                                     transition
-                                                                    ${
-                                                                        selected
-                                                                            ? "bg-[#1E2540] text-[#C4B5FD]"
-                                                                            : "text-[#B8BFCD] hover:bg-[#151D33] hover:text-[#E5E7EB]"
+                                                                    ${selected
+                                                                        ? "bg-[#1E2540] text-[#C4B5FD]"
+                                                                        : "text-[#B8BFCD] hover:bg-[#151D33] hover:text-[#E5E7EB]"
                                                                     }
                                                                 `}
                                                             >
@@ -1127,10 +1299,9 @@ function CreateInterview() {
                                                 border
                                                 transition
                                                 duration-200
-                                                ${
-                                                    selected
-                                                        ? "bg-[#1A203A] border-[#6366F1]"
-                                                        : "bg-[#0D1425] border-[#293452] hover:border-[#39476D]"
+                                                ${selected
+                                                    ? "bg-[#1A203A] border-[#6366F1]"
+                                                    : "bg-[#0D1425] border-[#293452] hover:border-[#39476D]"
                                                 }
                                             `}
                                         >
@@ -1141,10 +1312,9 @@ function CreateInterview() {
                                                     className={`
                                                         text-sm
                                                         font-semibold
-                                                        ${
-                                                            selected
-                                                                ? "text-[#C4B5FD]"
-                                                                : "text-[#C5CBD6]"
+                                                        ${selected
+                                                            ? "text-[#C4B5FD]"
+                                                            : "text-[#C5CBD6]"
                                                         }
                                                     `}
                                                 >
@@ -1162,10 +1332,9 @@ function CreateInterview() {
                                                         flex
                                                         items-center
                                                         justify-center
-                                                        ${
-                                                            selected
-                                                                ? "border-[#8B5CF6]"
-                                                                : "border-[#46516D]"
+                                                        ${selected
+                                                            ? "border-[#8B5CF6]"
+                                                            : "border-[#46516D]"
                                                         }
                                                     `}
                                                 >

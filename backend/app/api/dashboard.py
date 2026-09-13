@@ -10,6 +10,11 @@ from app.core.security import get_current_user
 from app.models.interview import Interview
 from app.models.answer import Answer
 from app.models.evaluation import Evaluation
+from app.data.technical_topics import (
+    get_all_categories,
+    get_topics_for_category,
+    normalize_topic,
+)
 
 
 router = APIRouter()
@@ -335,4 +340,86 @@ def get_dashboard_stats(
 
         "not_started_list":
             not_started_list,
+    }
+
+@router.get("/recent-practice")
+def get_recent_practice(
+    user_id=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    interviews = (
+        db.query(Interview)
+        .filter(Interview.user_id == user_id)
+        .order_by(Interview.created_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    # Build a topic -> category lookup from the technical topic catalogue.
+    topic_category_map = {}
+
+    for category in get_all_categories():
+        category_value = category["value"]
+
+        for catalogue_topic in get_topics_for_category(category_value):
+            topic_category_map[
+                normalize_topic(catalogue_topic)
+            ] = category_value
+
+    recent = []
+    seen_topics = set()
+
+    for interview in interviews:
+        topic_key = normalize_topic(interview.topic)
+
+        # Skip duplicate topics.
+        if topic_key in seen_topics:
+            continue
+
+        seen_topics.add(topic_key)
+
+        category_value = topic_category_map.get(topic_key)
+
+        # If an older interview contains an alias such as "os",
+        # try matching it against the catalogue's normalized topics.
+        if not category_value:
+            for catalogue_topic_key, candidate_category in topic_category_map.items():
+                if (
+                    topic_key == catalogue_topic_key
+                    or topic_key in catalogue_topic_key
+                    or catalogue_topic_key in topic_key
+                ):
+                    category_value = candidate_category
+                    break
+
+        category_label = None
+
+        if category_value:
+            category = next(
+                (
+                    item
+                    for item in get_all_categories()
+                    if item["value"] == category_value
+                ),
+                None,
+            )
+
+            if category:
+                category_label = category.get("label")
+
+        recent.append({
+            "interview_id": str(interview.id),
+            "topic": interview.topic,
+            "category": category_value,
+            "categoryLabel": category_label,
+            "difficulty": interview.difficulty,
+            "status": interview.status,
+            "created_at": interview.created_at.isoformat(),
+        })
+
+        if len(recent) >= 6:
+            break
+
+    return {
+        "recent_practice": recent
     }
