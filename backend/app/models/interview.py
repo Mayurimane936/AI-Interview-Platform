@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel
 from sqlalchemy import Column, String, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
-
+from sqlalchemy import Integer
 from app.core.database import Base
 
 class BulkDeleteInterviewsRequest(BaseModel):
@@ -54,4 +54,15 @@ class Interview(Base):
         DateTime(timezone=True),
         default=datetime.utcnow,
         nullable=False,
+    )
+
+    interview_mode = Column(
+        String(20),
+        nullable=False,
+        default="untimed",
+    )
+
+    question_time_seconds = Column(
+        Integer,
+        nullable=True,
     )

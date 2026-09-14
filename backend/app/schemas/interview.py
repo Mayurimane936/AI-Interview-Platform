@@ -1,10 +1,12 @@
 from pydantic import BaseModel
 from typing import List, Optional
+from typing import Literal
 
 
 class InterviewCreate(BaseModel):
     topic: str
-    difficulty: str
+    difficulty: Literal["easy", "medium", "hard"]
+    interview_mode: Literal["timed", "untimed"] = "untimed"
 
 
 class EvaluationResult(BaseModel):

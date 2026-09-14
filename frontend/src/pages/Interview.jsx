@@ -501,54 +501,99 @@ function Interview() {
     const audioRef = useRef(null);
     const audioUrlRef = useRef(null);
 
-    const speakQuestion = async (text) => {
+    const stopAudioPlayback = () => {
+        if (audioRef.current) {
+            try {
+                audioRef.current.pause();
+                audioRef.current.currentTime = 0;
+            } catch {
+                // Already stopped.
+            }
+            audioRef.current = null;
+        }
+
+        if (audioUrlRef.current) {
+            URL.revokeObjectURL(audioUrlRef.current);
+            audioUrlRef.current = null;
+        }
+
+        setIsSpeaking(false);
+    };
+
+    const speakQuestion = async (text, { automatic = false } = {}) => {
         if (!text) {
-            return;
+            return false;
+        }
+
+        if (automatic && document.visibilityState !== "visible") {
+            return false;
         }
 
         try {
+            stopAudioPlayback();
             setIsSpeaking(true);
 
-            if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current.currentTime = 0;
-            }
-
-            if (audioUrlRef.current) {
-                URL.revokeObjectURL(audioUrlRef.current);
-                audioUrlRef.current = null;
-            }
-
             const audioUrl = await synthesizeSpeech(text);
+
+            if (automatic && document.visibilityState !== "visible") {
+                URL.revokeObjectURL(audioUrl);
+                setIsSpeaking(false);
+                return false;
+            }
+
             audioUrlRef.current = audioUrl;
 
             const audio = new Audio(audioUrl);
             audioRef.current = audio;
 
-            audio.onended = () => {
-                setIsSpeaking(false);
-            };
+            return await new Promise((resolve) => {
+                let settled = false;
 
-            audio.onerror = () => {
-                setIsSpeaking(false);
-            };
+                const finish = (played = true) => {
+                    if (settled) return;
+                    settled = true;
+                    if (audioRef.current === audio) {
+                        audioRef.current = null;
+                    }
+                    if (audioUrlRef.current === audioUrl) {
+                        URL.revokeObjectURL(audioUrl);
+                        audioUrlRef.current = null;
+                    }
+                    setIsSpeaking(false);
+                    resolve(played);
+                };
 
-            await audio.play();
+                audio.onended = () => finish(true);
+                audio.onerror = () => finish(false);
+                audio.onpause = () => {
+                    // Treat an intentional stop as cancellation, not completion.
+                    if (audio.currentTime === 0 && !audio.ended) {
+                        finish(false);
+                    }
+                };
+
+                audio.play().catch(() => finish(false));
+            });
         } catch (error) {
             console.error("AZURE TTS ERROR:", error);
             setIsSpeaking(false);
+            return false;
         }
     };
 
-    const speakWelcome = async () => {
+    const speakWelcome = async (automatic = false) => {
         const welcomeText =
-            "Welcome to your AI technical interview. You will receive one question at a time. Please explain your reasoning clearly and take your time. When you are ready, click Start Interview to begin.";
+            "Welcome to your AI technical interview. You will receive one question at a time. Please explain your reasoning clearly and take your time. Let's begin.";
 
-        await speakQuestion(welcomeText);
+        return await speakQuestion(welcomeText, { automatic });
     };
 
     const [interview, setInterview] = useState(null);
     const [questions, setQuestions] = useState([]);
+
+    useEffect(() => {
+        interviewRef.current = interview;
+    }, [interview]);
 
     const [currentQuestionIndex, setCurrentQuestionIndex] =
         useState(0);
@@ -567,6 +612,13 @@ function Interview() {
 
     const [isSpeaking, setIsSpeaking] =
         useState(false);
+
+    // =========================================================
+    // INTERVIEW TIMING
+    // =========================================================
+
+    const [timeRemaining, setTimeRemaining] = useState(null);
+    const timerSubmittingRef = useRef(false);
 
     // =========================================================
     // VOICE ANSWER STATE
@@ -603,6 +655,14 @@ function Interview() {
     const speechTokenRef = useRef(null);
     const silenceTimerRef = useRef(null);
 
+    // Prevent duplicate automatic Azure TTS calls for the same question.
+    // A question is automatically spoken only once while it remains the current question.
+    const spokenQuestionRef = useRef(null);
+    const welcomeSpokenRef = useRef(false);
+    const welcomeCompletedRef = useRef(false);
+    const welcomePromiseRef = useRef(null);
+    const interviewRef = useRef(null);
+
     const [submittedAnswers, setSubmittedAnswers] =
         useState({});
 
@@ -624,8 +684,8 @@ function Interview() {
             if (recognizer) {
                 try {
                     recognizer.stopContinuousRecognitionAsync(
-                        () => { },
-                        () => { }
+                        () => {},
+                        () => {}
                     );
                 } catch {
                     // Already stopped.
@@ -836,7 +896,7 @@ function Interview() {
                         setAnswer((previous) => {
                             const separator =
                                 previous &&
-                                    !previous.endsWith(" ")
+                                !previous.endsWith(" ")
                                     ? " "
                                     : "";
 
@@ -875,7 +935,7 @@ function Interview() {
 
                 setSpeechError(
                     event.errorDetails ||
-                    "Azure Speech recognition was canceled."
+                        "Azure Speech recognition was canceled."
                 );
 
                 speechRecognizerRef.current = null;
@@ -908,9 +968,9 @@ function Interview() {
                     () => {
                         setIsListening(true);
 
-                        // Start the initial 3-second silence timer.
-                        // This handles the case where the user starts
-                        // the microphone but does not say anything.
+                        // Start the silence timer immediately so that if the
+                        // user starts the microphone but says nothing, we still
+                        // ask whether they want to continue.
                         startSilenceTimer();
 
                         resolve();
@@ -955,7 +1015,7 @@ function Interview() {
             } else {
                 setSpeechError(
                     error?.message ||
-                    "Unable to start Azure Speech recognition. Please try again."
+                        "Unable to start Azure Speech recognition. Please try again."
                 );
             }
         }
@@ -997,7 +1057,7 @@ function Interview() {
 
             setSpeechError(
                 error?.message ||
-                "Unable to stop speech recognition cleanly."
+                    "Unable to stop speech recognition cleanly."
             );
         } finally {
             try {
@@ -1047,7 +1107,7 @@ function Interview() {
 
             setSpeechError(
                 error?.message ||
-                "Unable to continue speech recognition. Please try again."
+                    "Unable to continue speech recognition. Please try again."
             );
         }
     };
@@ -1197,6 +1257,27 @@ function Interview() {
         try {
             setStarting(true);
             setError("");
+            timerSubmittingRef.current = false;
+
+            // The welcome message plays automatically while the interview is
+            // still in the `created` state. If the user clicks Start early,
+            // wait for that intro to finish before actually starting.
+            if (!welcomeCompletedRef.current) {
+                if (welcomePromiseRef.current) {
+                    const welcomePlayed = await welcomePromiseRef.current;
+                    if (!welcomePlayed) {
+                        setError("The welcome audio could not be played. Please try again.");
+                        return;
+                    }
+                } else if (document.visibilityState === "visible") {
+                    const welcomePlayed = await speakWelcome(true);
+                    welcomeCompletedRef.current = welcomePlayed;
+                    if (!welcomePlayed) {
+                        setError("The welcome audio could not be played. Please try again.");
+                        return;
+                    }
+                }
+            }
 
             const data = await startInterview(
                 token,
@@ -1204,21 +1285,46 @@ function Interview() {
                 logout
             );
 
-            console.log(
-                "INTERVIEW STARTED:",
-                data
-            );
+            console.log("INTERVIEW STARTED:", data);
 
-            setInterview((previous) => ({
-                ...previous,
+            // Prevent the status-change effect from starting a duplicate
+            // automatic TTS call. handleStart owns the first question playback.
+            spokenQuestionRef.current = currentQuestion?.id || null;
+
+            const nextInterview = {
+                ...interviewRef.current,
                 status: data.status,
-            }));
-        } catch (err) {
-            console.error(
-                "START INTERVIEW ERROR:",
-                err
-            );
+            };
 
+            setInterview(nextInterview);
+
+            if (
+                document.visibilityState === "visible" &&
+                currentQuestion?.question_text
+            ) {
+                const played = await speakQuestion(
+                    currentQuestion.question_text,
+                    { automatic: false }
+                );
+
+                if (!played) {
+                    spokenQuestionRef.current = null;
+                    return;
+                }
+
+                spokenQuestionRef.current = currentQuestion.id;
+
+                if (
+                    nextInterview?.interview_mode === "timed" &&
+                    document.visibilityState === "visible"
+                ) {
+                    startQuestionTimer(
+                        nextInterview.question_time_seconds
+                    );
+                }
+            }
+        } catch (err) {
+            console.error("START INTERVIEW ERROR:", err);
             setError(err.message);
         } finally {
             setStarting(false);
@@ -1229,12 +1335,49 @@ function Interview() {
     // SUBMIT ANSWER + EVALUATE
     // =========================================================
 
-    const handleSubmitAnswer = async () => {
+    const handleSubmitAnswer = async ({ automaticTimeout = false } = {}) => {
+        // Any manual or automatic submission ends the current question timer.
+        setTimeRemaining(null);
+
         if (speechRecognizerRef.current) {
             await handleStopListening();
         }
 
         const finalAnswer = answer.trim();
+
+        if (automaticTimeout && !finalAnswer) {
+            // No answer entered when the timer expires. Still advance the
+            // interview so a single unanswered question cannot block progress.
+            try {
+                setSubmitting(true);
+                setError("");
+                setEvaluationError("");
+
+                setSubmittedAnswers((previous) => ({
+                    ...previous,
+                    [currentQuestion.id]: {
+                        answer: null,
+                        evaluation: {
+                            score: 0,
+                            correctness: "No answer provided.",
+                            relevance: "No answer provided.",
+                            clarity: "No answer provided.",
+                            feedback: "The time limit expired before an answer was submitted.",
+                        },
+                    },
+                }));
+
+                setTimeRemaining(null);
+
+                window.setTimeout(async () => {
+                    timerSubmittingRef.current = false;
+                    await handleNextQuestion();
+                }, 0);
+            } finally {
+                // handleNextQuestion owns the transition for an unanswered timeout.
+            }
+            return;
+        }
 
         if (!finalAnswer) {
             setError(
@@ -1313,27 +1456,33 @@ function Interview() {
                         evaluation: evaluationData,
                     },
                 }));
+
+                if (automaticTimeout) {
+                    setTimeRemaining(null);
+                    timerSubmittingRef.current = false;
+                    window.setTimeout(() => handleNextQuestion(), 0);
+                }
             } catch (evaluationErr) {
                 console.error(
                     "EVALUATION ERROR:",
                     evaluationErr
                 );
 
-                /*
-                 * IMPORTANT:
-                 *
-                 * The answer has already been saved.
-                 *
-                 * We DO NOT call submitAnswer() again.
-                 *
-                 * The user can retry only the evaluation
-                 * using the existing answer ID.
-                 */
-
                 setEvaluationError(
                     evaluationErr.message ||
                     "Unable to evaluate your answer right now."
                 );
+
+                if (automaticTimeout) {
+                    setTimeRemaining(null);
+                    timerSubmittingRef.current = false;
+                    window.setTimeout(() => handleNextQuestion(), 0);
+                }
+            }
+
+            if (automaticTimeout) {
+                setTimeRemaining(null);
+                timerSubmittingRef.current = false;
             }
         } catch (err) {
             console.error(
@@ -1419,6 +1568,8 @@ function Interview() {
                 (previous) => previous + 1
             );
 
+            setTimeRemaining(null);
+            timerSubmittingRef.current = false;
             setAnswer("");
             setInterimTranscript("");
             setAnswerWasPasted(false);
@@ -1476,11 +1627,24 @@ function Interview() {
     // =========================================================
     // WELCOME MESSAGE
     // =========================================================
+    // Play the introduction as soon as the interview page is ready, while the
+    // interview is still in the `created` state. The Start button waits for
+    // this promise before moving the interview to `in_progress`.
 
     useEffect(() => {
-        if (interview?.status === "created") {
-            speakWelcome();
+        if (
+            interview?.status !== "created" ||
+            document.visibilityState !== "visible" ||
+            welcomeSpokenRef.current
+        ) {
+            return;
         }
+
+        welcomeSpokenRef.current = true;
+        welcomePromiseRef.current = speakWelcome(true).then((played) => {
+            welcomeCompletedRef.current = played;
+            return played;
+        });
     }, [interview?.status]);
 
     // =========================================================
@@ -1488,19 +1652,17 @@ function Interview() {
     // =========================================================
 
     useEffect(() => {
-        if (
-            interview?.status === "in_progress" &&
-            currentQuestion?.question_text
-        ) {
-            speakQuestion(currentQuestion.question_text);
-        }
+        // Whenever the current question changes, allow exactly one automatic
+        // TTS call for that new question.
+        spokenQuestionRef.current = null;
 
-        return () => {
+        const stopQuestionAudio = () => {
             setIsSpeaking(false);
 
             if (audioRef.current) {
                 audioRef.current.pause();
                 audioRef.current.currentTime = 0;
+                audioRef.current = null;
             }
 
             if (audioUrlRef.current) {
@@ -1508,11 +1670,159 @@ function Interview() {
                 audioUrlRef.current = null;
             }
         };
+
+        const speakCurrentQuestionIfVisible = () => {
+            if (
+                document.visibilityState !== "visible" ||
+                interview?.status !== "in_progress" ||
+                !currentQuestion?.question_text ||
+                !currentQuestion?.id
+            ) {
+                return;
+            }
+
+            if (!welcomeCompletedRef.current) {
+                return;
+            }
+
+            // Do not call Azure again while the same question has already
+            // been successfully spoken. The explicit speaker button remains
+            // available when the user wants a replay.
+            if (spokenQuestionRef.current === currentQuestion.id) {
+                return;
+            }
+
+            // Reserve this question while the request is in flight so a
+            // visibility event cannot start duplicate Azure calls. If the
+            // playback is cancelled/fails, the marker is cleared so the
+            // question can be spoken again when the tab becomes visible.
+            spokenQuestionRef.current = currentQuestion.id;
+
+            speakQuestion(currentQuestion.question_text, { automatic: true })
+                .then((played) => {
+                    if (!played) {
+                        spokenQuestionRef.current = null;
+                        return;
+                    }
+
+                    // The countdown begins only after the question audio has
+                    // finished. The timer continues to run once started;
+                    // hiding the tab only stops the voice playback.
+                    if (
+                        interview?.interview_mode === "timed" &&
+                        document.visibilityState === "visible"
+                    ) {
+                        startQuestionTimer(interviewRef.current?.question_time_seconds);
+                    }
+                });
+        };
+
+        // Speak automatically only when the interview tab is actually visible.
+        speakCurrentQuestionIfVisible();
+
+        // If the user returns to this tab before the question has been spoken,
+        // speak it then. This avoids making background Azure TTS calls.
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === "visible") {
+                speakCurrentQuestionIfVisible();
+            } else {
+                // Stop any question audio when the interview is no longer the
+                // active tab so we do not keep talking in the background.
+                stopQuestionAudio();
+            }
+        };
+
+        document.addEventListener(
+            "visibilitychange",
+            handleVisibilityChange
+        );
+
+        return () => {
+            document.removeEventListener(
+                "visibilitychange",
+                handleVisibilityChange
+            );
+            stopQuestionAudio();
+        };
     }, [
         currentQuestionIndex,
         interview?.status,
+        currentQuestion?.id,
         currentQuestion?.question_text,
     ]);
+
+    // =========================================================
+    // QUESTION TIMER
+    // =========================================================
+
+    const currentSubmissionForTimer = currentQuestion
+        ? submittedAnswers[currentQuestion.id]
+        : null;
+
+    const hasSubmittedForTimer = !!currentSubmissionForTimer;
+
+    const startQuestionTimer = (seconds = null) => {
+        const currentInterview = interviewRef.current || interview;
+        const duration = seconds ?? currentInterview?.question_time_seconds;
+
+        if (
+            currentInterview?.interview_mode === "timed" &&
+            duration
+        ) {
+            setTimeRemaining(duration);
+            timerSubmittingRef.current = false;
+        } else {
+            setTimeRemaining(null);
+        }
+    };
+
+    useEffect(() => {
+        if (
+            interview?.status === "in_progress" &&
+            interview?.interview_mode === "untimed"
+        ) {
+            setTimeRemaining(null);
+        }
+    }, [interview?.status, interview?.interview_mode]);
+
+    useEffect(() => {
+        if (
+            interview?.interview_mode !== "timed" ||
+            timeRemaining === null ||
+            hasSubmittedForTimer ||
+            submitting
+        ) {
+            return;
+        }
+
+        if (timeRemaining <= 0) {
+            if (!timerSubmittingRef.current) {
+                timerSubmittingRef.current = true;
+                handleSubmitAnswer({ automaticTimeout: true });
+            }
+            return;
+        }
+
+        const timerId = window.setTimeout(() => {
+            setTimeRemaining((previous) =>
+                typeof previous === "number" ? previous - 1 : previous
+            );
+        }, 1000);
+
+        return () => window.clearTimeout(timerId);
+    }, [
+        timeRemaining,
+        interview?.interview_mode,
+        hasSubmittedForTimer,
+        submitting,
+    ]);
+
+    const formatTimeRemaining = (seconds) => {
+        if (seconds === null || seconds === undefined) return "";
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+        return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+    };
 
     // =========================================================
     // LOADING STATE
@@ -2137,6 +2447,28 @@ function Interview() {
                                         Click the speaker icon to hear the question again.
                                     </p>
 
+                                    {interview?.interview_mode === "timed" &&
+                                        interview?.status === "in_progress" &&
+                                        currentQuestion &&
+                                        timeRemaining !== null && (
+                                            <div className="mt-5 flex justify-start">
+                                                <div
+                                                    className={`inline-flex items-center gap-3 px-4 py-2.5 rounded-xl border ${
+                                                        timeRemaining <= 30
+                                                            ? "bg-red-500/10 border-red-500/20 text-red-400"
+                                                            : "bg-[#151D33] border-[#2E3857] text-[#C4B5FD]"
+                                                    }`}
+                                                >
+                                                    <span className="text-[10px] uppercase tracking-widest opacity-70">
+                                                        Time left
+                                                    </span>
+                                                    <span className="font-mono font-semibold text-base">
+                                                        {formatTimeRemaining(timeRemaining)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        )}
+
                                 </div>
 
 
@@ -2155,20 +2487,22 @@ function Interview() {
                                                 <button
                                                     type="button"
                                                     onClick={() => handleAnswerModeChange("type")}
-                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${answerMode === "type"
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                                                        answerMode === "type"
                                                             ? "bg-[#1E2540] text-[#C4B5FD]"
                                                             : "text-[#737C8E] hover:text-[#C7CBD5]"
-                                                        }`}
+                                                    }`}
                                                 >
                                                     ⌨ Type
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => handleAnswerModeChange("speak")}
-                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${answerMode === "speak"
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                                                        answerMode === "speak"
                                                             ? "bg-[#1E2540] text-[#C4B5FD]"
                                                             : "text-[#737C8E] hover:text-[#C7CBD5]"
-                                                        }`}
+                                                    }`}
                                                 >
                                                     🎙 Speak
                                                 </button>

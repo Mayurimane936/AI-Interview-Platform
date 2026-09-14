@@ -23,6 +23,9 @@ function CreateInterview() {
     const difficultyFromUrl =
         searchParams.get("difficulty");
 
+    const interviewModeFromUrl =
+        searchParams.get("interview_mode");
+
     // ==========================================
     // CATEGORY STATE
     // ==========================================
@@ -65,6 +68,15 @@ function CreateInterview() {
             )
                 ? difficultyFromUrl
                 : "medium"
+        );
+
+    const [interviewMode, setInterviewMode] =
+        useState(
+            ["timed", "untimed"].includes(
+                interviewModeFromUrl
+            )
+                ? interviewModeFromUrl
+                : "untimed"
         );
 
     const [loading, setLoading] =
@@ -196,17 +208,29 @@ function CreateInterview() {
     ]);
 
     // ==========================================
-    // LOAD TOPIC FROM URL
+    // LOAD TOPIC / DIFFICULTY / MODE FROM URL
     // ==========================================
 
     useEffect(() => {
-        if (topicFromUrl && category) {
-            setTopic(topicFromUrl);
-            setTopicSearch(topicFromUrl);
-            setTopics([]);
-            setShowTopicResults(false);
+        if (!category || !topicFromUrl) {
+            return;
         }
-    }, [topicFromUrl, category]);
+
+        setTopic(topicFromUrl);
+        setTopicSearch(topicFromUrl);
+        setTopics([]);
+        setShowTopicResults(false);
+    }, [category, topicFromUrl]);
+
+    useEffect(() => {
+        if (["easy", "medium", "hard"].includes(difficultyFromUrl)) {
+            setDifficulty(difficultyFromUrl);
+        }
+
+        if (["timed", "untimed"].includes(interviewModeFromUrl)) {
+            setInterviewMode(interviewModeFromUrl);
+        }
+    }, [difficultyFromUrl, interviewModeFromUrl]);
 
     // ==========================================
     // LOAD TOPICS ONLY AFTER USER TYPES
@@ -223,8 +247,7 @@ function CreateInterview() {
         const searchValue =
             topicSearch.trim();
 
-        // A topic loaded from a recent-practice shortcut is already
-        // selected, so do not reopen the search results.
+        // A topic loaded from a recent-practice shortcut is already selected.
         if (topic && topic.trim() === searchValue) {
             setTopics([]);
             setTopicsLoading(false);
@@ -323,21 +346,20 @@ function CreateInterview() {
         setShowTopicResults(false);
         setError("");
 
+        const params = new URLSearchParams();
+
         if (selectedCategory) {
-            navigate(
-                `/create-interview?category=${selectedCategory}`,
-                {
-                    replace: true,
-                }
-            );
-        } else {
-            navigate(
-                "/create-interview",
-                {
-                    replace: true,
-                }
-            );
+            params.set("category", selectedCategory);
         }
+
+        params.set("interview_mode", interviewMode);
+
+        navigate(
+            `/create-interview?${params.toString()}`,
+            {
+                replace: true,
+            }
+        );
     };
 
     // ==========================================
@@ -351,35 +373,6 @@ function CreateInterview() {
         setTopicSearch(selectedTopic);
         setShowTopicResults(false);
         setError("");
-    };
-
-    // ==========================================
-    // RECENT PRACTICE
-    // ==========================================
-
-    const handleRecentPractice = (item) => {
-        if (!item?.topic) {
-            return;
-        }
-
-        // Recent-practice records include the catalogue category so
-        // we can preselect both category and topic without searching.
-        if (!item.category) {
-            setError(
-                "This recent topic could not be linked to a category. Please search for it instead."
-            );
-            return;
-        }
-
-        const params = new URLSearchParams();
-        params.set("category", item.category);
-        params.set("topic", item.topic);
-
-        if (item.difficulty) {
-            params.set("difficulty", item.difficulty);
-        }
-
-        navigate(`/create-interview?${params.toString()}`);
     };
 
     // ==========================================
@@ -421,6 +414,7 @@ function CreateInterview() {
                     {
                         topic: topic.trim(),
                         difficulty,
+                        interview_mode: interviewMode,
                     },
                     logout
                 );
@@ -446,6 +440,80 @@ function CreateInterview() {
         } finally {
             setLoading(false);
         }
+    };
+
+    // ==========================================
+    // RECENT PRACTICE SELECT
+    // ==========================================
+
+    const handleRecentPractice = async (item) => {
+        if (!item?.topic) {
+            return;
+        }
+
+        setError("");
+
+        // Prefer category supplied by the backend.
+        let recentCategory = item.category;
+
+        // Older recent-practice responses may not contain category.
+        // Resolve it from the catalogue before navigating.
+        if (!recentCategory && categories.length) {
+            const normalizedTopic = item.topic.trim().toLowerCase();
+
+            try {
+                for (const categoryItem of categories) {
+                    const params = new URLSearchParams();
+                    params.set("category", categoryItem.value);
+                    params.set("search", item.topic.trim());
+
+                    const response = await fetch(
+                        `${API_URL}/interviews/topics?${params.toString()}`
+                    );
+
+                    if (!response.ok) {
+                        continue;
+                    }
+
+                    const data = await response.json();
+                    const matchingTopics = data.topics || [];
+
+                    const exactMatch = matchingTopics.find(
+                        (value) =>
+                            value?.trim().toLowerCase() === normalizedTopic
+                    );
+
+                    if (exactMatch) {
+                        recentCategory = categoryItem.value;
+                        break;
+                    }
+                }
+            } catch (err) {
+                console.error(
+                    "RECENT PRACTICE CATEGORY RESOLUTION ERROR:",
+                    err
+                );
+            }
+        }
+
+        if (!recentCategory) {
+            setError("This recent topic could not be linked to a category. Please search for it instead.");
+            return;
+        }
+
+        const params = new URLSearchParams();
+        params.set("category", recentCategory);
+        params.set("topic", item.topic);
+
+        if (item.difficulty) {
+            params.set("difficulty", item.difficulty);
+        }
+
+        if (item.interview_mode === "timed" || item.interview_mode === "untimed") {
+            params.set("interview_mode", item.interview_mode);
+        }
+
+        navigate(`/create-interview?${params.toString()}`);
     };
 
     // ==========================================
@@ -724,7 +792,7 @@ function CreateInterview() {
                                     </h3>
 
                                     <p className="text-sm text-[#70798B] mt-1">
-                                        Jump back into a topic you recently practiced.
+                                        Continue practicing topics you worked on recently.
                                     </p>
                                 </div>
 
@@ -733,10 +801,7 @@ function CreateInterview() {
                                         <button
                                             key={item.interview_id}
                                             type="button"
-                                            onClick={() =>
-                                                handleRecentPractice(item)
-                                            }
-                                            title={`Practice ${item.topic} again`}
+                                            onClick={() => handleRecentPractice(item)}
                                             className="
                                                 w-full
                                                 text-left
@@ -752,26 +817,24 @@ function CreateInterview() {
                                                 gap-4
                                                 hover:border-[#6366F1]
                                                 hover:bg-[#141C32]
+                                                focus:outline-none
+                                                focus:ring-2
+                                                focus:ring-[#6366F1]/30
                                                 transition
-                                                group
                                             "
                                         >
                                             <div className="min-w-0">
-                                                <p className="text-sm font-medium text-[#D8DCE5] truncate capitalize group-hover:text-[#E5E7EB]">
+                                                <p className="text-sm font-medium text-[#D8DCE5] truncate capitalize">
                                                     {item.topic}
                                                 </p>
 
                                                 <p className="text-xs text-[#687184] mt-1 capitalize">
-                                                    {item.categoryLabel || item.category || "Technical practice"}
-                                                    {item.difficulty ? ` · ${item.difficulty}` : ""}
+                                                    {item.difficulty} · {item.status}
                                                 </p>
                                             </div>
 
-                                            <span className="text-xs text-[#8B5CF6] shrink-0 flex items-center gap-1">
-                                                Practice again
-                                                <span className="text-[#6366F1]">
-                                                    →
-                                                </span>
+                                            <span className="text-xs text-[#8B5CF6] shrink-0">
+                                                Practice →
                                             </span>
                                         </button>
                                     ))}
@@ -1358,6 +1421,68 @@ function CreateInterview() {
                                 }
                             )}
 
+                        </div>
+
+                    </div>
+
+                    {/* ==========================================
+                        INTERVIEW MODE
+                    ========================================== */}
+
+                    <div className="mt-8">
+
+                        <div className="mb-5">
+                            <h3 className="text-base font-semibold text-[#DDE1E9]">
+                                Interview Mode
+                            </h3>
+                            <p className="text-sm text-[#70798B] mt-1">
+                                Choose whether you want to practice with a question time limit.
+                            </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {[
+                                {
+                                    value: "timed",
+                                    label: "Timed Interview",
+                                    description: "Practice under interview pressure with a fixed time per question.",
+                                    details: "Easy 3 min · Medium 5 min · Hard 8 min",
+                                },
+                                {
+                                    value: "untimed",
+                                    label: "No Timer",
+                                    description: "Take your time and focus on understanding and explaining the solution.",
+                                    details: "No question deadline",
+                                },
+                            ].map((item) => {
+                                const selected = interviewMode === item.value;
+
+                                return (
+                                    <button
+                                        key={item.value}
+                                        type="button"
+                                        onClick={() => setInterviewMode(item.value)}
+                                        className={`text-left p-5 rounded-xl border transition duration-200 ${selected ? "bg-[#1A203A] border-[#6366F1]" : "bg-[#0D1425] border-[#293452] hover:border-[#39476D]"}`}
+                                    >
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className={`text-sm font-semibold ${selected ? "text-[#C4B5FD]" : "text-[#C5CBD6]"}`}>
+                                                {item.label}
+                                            </span>
+                                            <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${selected ? "border-[#8B5CF6]" : "border-[#46516D]"}`}>
+                                                {selected && <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />}
+                                            </span>
+                                        </div>
+
+                                        <p className="text-xs text-[#737C8E] leading-5">
+                                            {item.description}
+                                        </p>
+
+                                        <p className="text-xs text-[#A78BFA] mt-3">
+                                            {item.details}
+                                        </p>
+                                    </button>
+                                );
+                            })}
                         </div>
 
                     </div>

@@ -29,7 +29,11 @@ from app.data.technical_topics import (
 
 router = APIRouter()
 
-
+QUESTION_TIMES = {
+    "easy": 180,      # 3 minutes
+    "medium": 300,    # 5 minutes
+    "hard": 480,      # 8 minutes
+}
 # =========================================================
 # TECHNICAL CATEGORIES
 # =========================================================
@@ -89,6 +93,12 @@ def create_interview(
         user_id=user_id,
         topic=interview_data.topic,
         difficulty=interview_data.difficulty,
+        interview_mode=interview_data.interview_mode,
+        question_time_seconds=(
+            QUESTION_TIMES[interview_data.difficulty]
+            if interview_data.interview_mode == "timed"
+            else None
+        ),
     )
 
     db.add(interview)
@@ -226,6 +236,8 @@ def get_interview(
         "status": interview.status,
         "started_at": interview.started_at,
         "completed_at": interview.completed_at,
+        "interview_mode": interview.interview_mode,
+        "question_time_seconds": interview.question_time_seconds,
     }
 
 @router.get("/{interview_id}/questions")
