@@ -15,6 +15,480 @@ import {
     completeInterview,
 } from "../api/interview";
 
+function InterviewerAvatar({ isSpeaking, isListening, isThinking }) {
+    const state = isSpeaking
+        ? "speaking"
+        : isListening
+            ? "listening"
+            : isThinking
+                ? "thinking"
+                : "idle";
+
+    const config = {
+        speaking: {
+            label: "AI is speaking",
+            description: "Listen to the question",
+            accent: "#818CF8",
+            message: "Here's your question. Listen carefully.",
+        },
+        listening: {
+            label: "Listening to you",
+            description: "Take your time and explain",
+            accent: "#34D399",
+            message: "I'm listening to your answer...",
+        },
+        thinking: {
+            label: "Thinking",
+            description: "Analyzing your response",
+            accent: "#F59E0B",
+            message: "Let me think about that...",
+        },
+        idle: {
+            label: "AI interviewer",
+            description: "Ready for your response",
+            accent: "#A78BFA",
+            message: "Take your time. There's no rush.",
+        },
+    }[state];
+
+    return (
+        <div
+            className={`interviewer-panel interviewer-${state}`}
+            style={{ "--interviewer-accent": config.accent }}
+        >
+            <style>{`
+                @keyframes interviewerFloat {
+                    0%, 100% { transform: translateY(0); }
+                    50% { transform: translateY(-4px); }
+                }
+
+                @keyframes interviewerBreath {
+                    0%, 100% { transform: scale(1); }
+                    50% { transform: scale(1.018); }
+                }
+
+                @keyframes interviewerTalkHead {
+                    0%, 100% { transform: rotate(0deg) translateY(0); }
+                    30% { transform: rotate(-1.5deg) translateY(-1px); }
+                    70% { transform: rotate(1.3deg) translateY(0); }
+                }
+
+                @keyframes interviewerListenHead {
+                    0%, 100% { transform: rotate(0deg); }
+                    28% { transform: rotate(-3deg); }
+                    62% { transform: rotate(2deg); }
+                }
+
+                @keyframes interviewerThinkHead {
+                    0%, 100% { transform: rotate(-1deg) translateY(0); }
+                    50% { transform: rotate(2deg) translateY(-2px); }
+                }
+
+                @keyframes interviewerBlink {
+                    0%, 44%, 47%, 100% { transform: scaleY(1); }
+                    45.5% { transform: scaleY(0.08); }
+                }
+
+                @keyframes interviewerMouth {
+                    0%, 100% { transform: translateX(-50%) scaleY(.55); }
+                    50% { transform: translateX(-50%) scaleY(1.5); }
+                }
+
+                @keyframes interviewerWave {
+                    0%, 100% { transform: scaleY(.28); opacity: .3; }
+                    50% { transform: scaleY(1); opacity: 1; }
+                }
+
+                @keyframes interviewerPulse {
+                    0%, 100% { transform: scale(.92); opacity: .18; }
+                    50% { transform: scale(1.08); opacity: .45; }
+                }
+
+                @keyframes interviewerDot {
+                    0%, 80%, 100% { opacity: .25; transform: translateY(0); }
+                    40% { opacity: 1; transform: translateY(-2px); }
+                }
+
+                @keyframes interviewerGlow {
+                    0%, 100% { box-shadow: 0 0 0 rgba(99,102,241,0); }
+                    50% { box-shadow: 0 0 35px color-mix(in srgb, var(--interviewer-accent) 18%, transparent); }
+                }
+
+                .interviewer-panel {
+                    width: 100%;
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                    gap: 22px;
+                    padding: 18px 20px 18px 18px;
+                    border: 1px solid #2A3453;
+                    border-radius: 22px;
+                    background:
+                        radial-gradient(circle at 12% 35%, rgba(99,102,241,.16), transparent 30%),
+                        linear-gradient(135deg, #11182B 0%, #151D33 100%);
+                    box-shadow: 0 18px 45px rgba(0,0,0,.22);
+                    overflow: hidden;
+                    animation: interviewerGlow 3s ease-in-out infinite;
+                }
+
+                .interviewer-panel::after {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    pointer-events: none;
+                    background: linear-gradient(90deg, rgba(255,255,255,.025), transparent 35%);
+                }
+
+                .interviewer-portrait {
+                    position: relative;
+                    flex: 0 0 112px;
+                    width: 112px;
+                    height: 112px;
+                    border-radius: 30px;
+                    display: flex;
+                    justify-content: center;
+                    align-items: flex-end;
+                    background:
+                        radial-gradient(circle at 50% 30%, #34417B 0%, #232E59 44%, #141B31 100%);
+                    border: 1px solid #3A4670;
+                    overflow: hidden;
+                    animation: interviewerFloat 3.6s ease-in-out infinite;
+                }
+
+                .interviewer-portrait::before {
+                    content: "";
+                    position: absolute;
+                    width: 92px;
+                    height: 92px;
+                    border-radius: 50%;
+                    border: 1px solid var(--interviewer-accent);
+                    opacity: .28;
+                    animation: interviewerPulse 2.3s ease-in-out infinite;
+                }
+
+                .interviewer-portrait::after {
+                    content: "";
+                    position: absolute;
+                    inset: 10px;
+                    border-radius: 24px;
+                    background: linear-gradient(180deg, rgba(255,255,255,.025), transparent 55%);
+                }
+
+                .interviewer-body {
+                    position: absolute;
+                    bottom: -14px;
+                    width: 82px;
+                    height: 56px;
+                    border-radius: 36px 36px 10px 10px;
+                    background: linear-gradient(135deg, #6366F1, #8B5CF6);
+                    z-index: 1;
+                }
+
+                .interviewer-neck {
+                    position: absolute;
+                    bottom: 43px;
+                    width: 19px;
+                    height: 17px;
+                    border-radius: 6px;
+                    background: #DCA27F;
+                    z-index: 2;
+                }
+
+                .interviewer-head {
+                    position: absolute;
+                    top: 17px;
+                    width: 52px;
+                    height: 59px;
+                    border-radius: 48% 48% 44% 44%;
+                    background: linear-gradient(145deg, #F7D1B2, #DCA27F);
+                    box-shadow: 0 10px 18px rgba(0,0,0,.24);
+                    z-index: 3;
+                    transform-origin: 50% 90%;
+                    animation: interviewerBreath 3.8s ease-in-out infinite;
+                }
+
+                .interviewer-hair {
+                    position: absolute;
+                    top: -7px;
+                    left: -5px;
+                    width: 62px;
+                    height: 39px;
+                    border-radius: 55% 55% 34% 34%;
+                    background: linear-gradient(145deg, #432B42, #211928);
+                    z-index: 5;
+                }
+
+                .interviewer-hair::after {
+                    content: "";
+                    position: absolute;
+                    left: 5px;
+                    top: 7px;
+                    width: 24px;
+                    height: 8px;
+                    border-radius: 99px;
+                    background: rgba(255,255,255,.07);
+                    transform: rotate(-14deg);
+                }
+
+                .interviewer-hair-left,
+                .interviewer-hair-right {
+                    position: absolute;
+                    top: 17px;
+                    width: 10px;
+                    height: 33px;
+                    border-radius: 10px;
+                    background: #241927;
+                    z-index: 5;
+                }
+
+                .interviewer-hair-left { left: -7px; }
+                .interviewer-hair-right { right: -7px; }
+
+                .interviewer-eye {
+                    position: absolute;
+                    top: 27px;
+                    width: 7px;
+                    height: 9px;
+                    border-radius: 50%;
+                    background: #211C30;
+                    animation: interviewerBlink 5.2s infinite;
+                }
+
+                .interviewer-eye-left { left: 12px; }
+                .interviewer-eye-right { right: 12px; }
+
+                .interviewer-eye::after {
+                    content: "";
+                    position: absolute;
+                    width: 2px;
+                    height: 2px;
+                    border-radius: 50%;
+                    top: 2px;
+                    left: 2px;
+                    background: rgba(255,255,255,.7);
+                }
+
+                .interviewer-nose {
+                    position: absolute;
+                    left: 50%;
+                    top: 36px;
+                    width: 4px;
+                    height: 8px;
+                    border-radius: 6px;
+                    transform: translateX(-50%);
+                    background: rgba(127,65,54,.25);
+                }
+
+                .interviewer-mouth {
+                    position: absolute;
+                    left: 50%;
+                    top: 47px;
+                    width: 14px;
+                    height: 7px;
+                    border-radius: 0 0 12px 12px;
+                    transform: translateX(-50%) scaleY(.6);
+                    background: #7D2D46;
+                }
+
+                .interviewer-speaking .interviewer-head {
+                    animation: interviewerTalkHead 1.7s ease-in-out infinite;
+                }
+
+                .interviewer-speaking .interviewer-mouth {
+                    animation: interviewerMouth .31s ease-in-out infinite;
+                }
+
+                .interviewer-listening .interviewer-head {
+                    animation: interviewerListenHead 2.1s ease-in-out infinite;
+                }
+
+                .interviewer-thinking .interviewer-head {
+                    animation: interviewerThinkHead 2s ease-in-out infinite;
+                }
+
+                .interviewer-content {
+                    min-width: 0;
+                    flex: 1;
+                    position: relative;
+                    z-index: 2;
+                }
+
+                .interviewer-eyebrow {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+
+                .interviewer-status-dot {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 999px;
+                    background: var(--interviewer-accent);
+                    box-shadow: 0 0 14px color-mix(in srgb, var(--interviewer-accent) 85%, transparent);
+                    flex-shrink: 0;
+                }
+
+                .interviewer-title {
+                    font-size: 13px;
+                    font-weight: 700;
+                    letter-spacing: .025em;
+                    color: #D8DCEE;
+                }
+
+                .interviewer-description {
+                    margin-top: 4px;
+                    font-size: 12px;
+                    color: #737E92;
+                }
+
+                .interviewer-message {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 10px;
+                    margin-top: 13px;
+                    max-width: 100%;
+                    padding: 9px 12px;
+                    border-radius: 12px;
+                    border: 1px solid #293452;
+                    background: #0B1020;
+                    color: #B9C0CF;
+                    font-size: 11px;
+                }
+
+                .interviewer-waves {
+                    display: flex;
+                    align-items: center;
+                    gap: 3px;
+                    height: 18px;
+                    flex-shrink: 0;
+                }
+
+                .interviewer-wave {
+                    width: 3px;
+                    border-radius: 99px;
+                    background: var(--interviewer-accent);
+                    transform-origin: center;
+                }
+
+                .interviewer-wave:nth-child(1) { height: 7px; }
+                .interviewer-wave:nth-child(2) { height: 12px; }
+                .interviewer-wave:nth-child(3) { height: 17px; }
+                .interviewer-wave:nth-child(4) { height: 11px; }
+                .interviewer-wave:nth-child(5) { height: 6px; }
+
+                .interviewer-speaking .interviewer-wave:nth-child(1) { animation: interviewerWave .42s infinite; }
+                .interviewer-speaking .interviewer-wave:nth-child(2) { animation: interviewerWave .35s .07s infinite; }
+                .interviewer-speaking .interviewer-wave:nth-child(3) { animation: interviewerWave .40s .14s infinite; }
+                .interviewer-speaking .interviewer-wave:nth-child(4) { animation: interviewerWave .37s .09s infinite; }
+                .interviewer-speaking .interviewer-wave:nth-child(5) { animation: interviewerWave .45s .04s infinite; }
+
+                .interviewer-listening .interviewer-wave,
+                .interviewer-thinking .interviewer-wave,
+                .interviewer-idle .interviewer-wave {
+                    opacity: .16;
+                }
+
+                .interviewer-thinking-dots {
+                    display: inline-flex;
+                    gap: 3px;
+                }
+
+                .interviewer-thinking-dot {
+                    width: 4px;
+                    height: 4px;
+                    border-radius: 50%;
+                    background: #F59E0B;
+                    animation: interviewerDot 1.1s infinite;
+                }
+
+                .interviewer-thinking-dot:nth-child(2) { animation-delay: .15s; }
+                .interviewer-thinking-dot:nth-child(3) { animation-delay: .3s; }
+
+                @media (max-width: 640px) {
+                    .interviewer-panel {
+                        gap: 14px;
+                        padding: 14px;
+                        border-radius: 18px;
+                    }
+
+                    .interviewer-portrait {
+                        flex-basis: 82px;
+                        width: 82px;
+                        height: 82px;
+                        border-radius: 22px;
+                    }
+
+                    .interviewer-head {
+                        transform: scale(.78);
+                        top: 5px;
+                    }
+
+                    .interviewer-body {
+                        transform: scale(.78);
+                        bottom: -13px;
+                    }
+
+                    .interviewer-neck {
+                        transform: scale(.78);
+                    }
+
+                    .interviewer-message {
+                        display: none;
+                    }
+                }
+            `}</style>
+
+            <div className="interviewer-portrait" aria-hidden="true">
+                <div className="interviewer-body" />
+                <div className="interviewer-neck" />
+
+                <div className="interviewer-head">
+                    <div className="interviewer-hair" />
+                    <div className="interviewer-hair-left" />
+                    <div className="interviewer-hair-right" />
+                    <div className="interviewer-eye interviewer-eye-left" />
+                    <div className="interviewer-eye interviewer-eye-right" />
+                    <div className="interviewer-nose" />
+                    <div className="interviewer-mouth" />
+                </div>
+            </div>
+
+            <div className="interviewer-content">
+                <div className="interviewer-eyebrow">
+                    <span className="interviewer-status-dot" />
+                    <span className="interviewer-title">
+                        {config.label}
+                    </span>
+                </div>
+
+                <div className="interviewer-description">
+                    {config.description}
+                </div>
+
+                <div className="interviewer-message">
+                    <div className="interviewer-waves">
+                        <span className="interviewer-wave" />
+                        <span className="interviewer-wave" />
+                        <span className="interviewer-wave" />
+                        <span className="interviewer-wave" />
+                        <span className="interviewer-wave" />
+                    </div>
+
+                    <span>{config.message}</span>
+
+                    {state === "thinking" && (
+                        <span className="interviewer-thinking-dots">
+                            <span className="interviewer-thinking-dot" />
+                            <span className="interviewer-thinking-dot" />
+                            <span className="interviewer-thinking-dot" />
+                        </span>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function Interview() {
     const { interviewId } = useParams();
     const { token, logout } = useAuth();
@@ -150,8 +624,8 @@ function Interview() {
             if (recognizer) {
                 try {
                     recognizer.stopContinuousRecognitionAsync(
-                        () => {},
-                        () => {}
+                        () => { },
+                        () => { }
                     );
                 } catch {
                     // Already stopped.
@@ -362,7 +836,7 @@ function Interview() {
                         setAnswer((previous) => {
                             const separator =
                                 previous &&
-                                !previous.endsWith(" ")
+                                    !previous.endsWith(" ")
                                     ? " "
                                     : "";
 
@@ -401,7 +875,7 @@ function Interview() {
 
                 setSpeechError(
                     event.errorDetails ||
-                        "Azure Speech recognition was canceled."
+                    "Azure Speech recognition was canceled."
                 );
 
                 speechRecognizerRef.current = null;
@@ -433,6 +907,12 @@ function Interview() {
                 recognizer.startContinuousRecognitionAsync(
                     () => {
                         setIsListening(true);
+
+                        // Start the initial 3-second silence timer.
+                        // This handles the case where the user starts
+                        // the microphone but does not say anything.
+                        startSilenceTimer();
+
                         resolve();
                     },
                     (error) => {
@@ -475,7 +955,7 @@ function Interview() {
             } else {
                 setSpeechError(
                     error?.message ||
-                        "Unable to start Azure Speech recognition. Please try again."
+                    "Unable to start Azure Speech recognition. Please try again."
                 );
             }
         }
@@ -517,7 +997,7 @@ function Interview() {
 
             setSpeechError(
                 error?.message ||
-                    "Unable to stop speech recognition cleanly."
+                "Unable to stop speech recognition cleanly."
             );
         } finally {
             try {
@@ -567,7 +1047,7 @@ function Interview() {
 
             setSpeechError(
                 error?.message ||
-                    "Unable to continue speech recognition. Please try again."
+                "Unable to continue speech recognition. Please try again."
             );
         }
     };
@@ -1551,6 +2031,17 @@ function Interview() {
                                 </div>
 
 
+                                {/* INTERVIEWER AVATAR */}
+
+                                <div className="px-7 pt-6">
+                                    <InterviewerAvatar
+                                        isSpeaking={isSpeaking}
+                                        isListening={isListening && answerMode === "speak"}
+                                        isThinking={submitting}
+                                    />
+                                </div>
+
+
                                 {/* Question text */}
 
                                 {isSpeaking && (
@@ -1664,22 +2155,20 @@ function Interview() {
                                                 <button
                                                     type="button"
                                                     onClick={() => handleAnswerModeChange("type")}
-                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                                                        answerMode === "type"
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${answerMode === "type"
                                                             ? "bg-[#1E2540] text-[#C4B5FD]"
                                                             : "text-[#737C8E] hover:text-[#C7CBD5]"
-                                                    }`}
+                                                        }`}
                                                 >
                                                     ⌨ Type
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => handleAnswerModeChange("speak")}
-                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                                                        answerMode === "speak"
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${answerMode === "speak"
                                                             ? "bg-[#1E2540] text-[#C4B5FD]"
                                                             : "text-[#737C8E] hover:text-[#C7CBD5]"
-                                                    }`}
+                                                        }`}
                                                 >
                                                     🎙 Speak
                                                 </button>
