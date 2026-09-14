@@ -684,8 +684,8 @@ function Interview() {
             if (recognizer) {
                 try {
                     recognizer.stopContinuousRecognitionAsync(
-                        () => {},
-                        () => {}
+                        () => { },
+                        () => { }
                     );
                 } catch {
                     // Already stopped.
@@ -896,7 +896,7 @@ function Interview() {
                         setAnswer((previous) => {
                             const separator =
                                 previous &&
-                                !previous.endsWith(" ")
+                                    !previous.endsWith(" ")
                                     ? " "
                                     : "";
 
@@ -935,7 +935,7 @@ function Interview() {
 
                 setSpeechError(
                     event.errorDetails ||
-                        "Azure Speech recognition was canceled."
+                    "Azure Speech recognition was canceled."
                 );
 
                 speechRecognizerRef.current = null;
@@ -1015,7 +1015,7 @@ function Interview() {
             } else {
                 setSpeechError(
                     error?.message ||
-                        "Unable to start Azure Speech recognition. Please try again."
+                    "Unable to start Azure Speech recognition. Please try again."
                 );
             }
         }
@@ -1057,7 +1057,7 @@ function Interview() {
 
             setSpeechError(
                 error?.message ||
-                    "Unable to stop speech recognition cleanly."
+                "Unable to stop speech recognition cleanly."
             );
         } finally {
             try {
@@ -1107,7 +1107,7 @@ function Interview() {
 
             setSpeechError(
                 error?.message ||
-                    "Unable to continue speech recognition. Please try again."
+                "Unable to continue speech recognition. Please try again."
             );
         }
     };
@@ -1287,9 +1287,11 @@ function Interview() {
 
             console.log("INTERVIEW STARTED:", data);
 
-            // Prevent the status-change effect from starting a duplicate
-            // automatic TTS call. handleStart owns the first question playback.
-            spokenQuestionRef.current = currentQuestion?.id || null;
+            // Do not speak Question 1 here. Changing the interview status to
+            // `in_progress` triggers the question TTS effect below, which is
+            // the single owner of automatic question playback. Keeping only
+            // that path prevents Question 1 from being spoken twice.
+            spokenQuestionRef.current = null;
 
             const nextInterview = {
                 ...interviewRef.current,
@@ -1297,32 +1299,6 @@ function Interview() {
             };
 
             setInterview(nextInterview);
-
-            if (
-                document.visibilityState === "visible" &&
-                currentQuestion?.question_text
-            ) {
-                const played = await speakQuestion(
-                    currentQuestion.question_text,
-                    { automatic: false }
-                );
-
-                if (!played) {
-                    spokenQuestionRef.current = null;
-                    return;
-                }
-
-                spokenQuestionRef.current = currentQuestion.id;
-
-                if (
-                    nextInterview?.interview_mode === "timed" &&
-                    document.visibilityState === "visible"
-                ) {
-                    startQuestionTimer(
-                        nextInterview.question_time_seconds
-                    );
-                }
-            }
         } catch (err) {
             console.error("START INTERVIEW ERROR:", err);
             setError(err.message);
@@ -2453,11 +2429,10 @@ function Interview() {
                                         timeRemaining !== null && (
                                             <div className="mt-5 flex justify-start">
                                                 <div
-                                                    className={`inline-flex items-center gap-3 px-4 py-2.5 rounded-xl border ${
-                                                        timeRemaining <= 30
+                                                    className={`inline-flex items-center gap-3 px-4 py-2.5 rounded-xl border ${timeRemaining <= 30
                                                             ? "bg-red-500/10 border-red-500/20 text-red-400"
                                                             : "bg-[#151D33] border-[#2E3857] text-[#C4B5FD]"
-                                                    }`}
+                                                        }`}
                                                 >
                                                     <span className="text-[10px] uppercase tracking-widest opacity-70">
                                                         Time left
@@ -2487,22 +2462,20 @@ function Interview() {
                                                 <button
                                                     type="button"
                                                     onClick={() => handleAnswerModeChange("type")}
-                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                                                        answerMode === "type"
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${answerMode === "type"
                                                             ? "bg-[#1E2540] text-[#C4B5FD]"
                                                             : "text-[#737C8E] hover:text-[#C7CBD5]"
-                                                    }`}
+                                                        }`}
                                                 >
                                                     ⌨ Type
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => handleAnswerModeChange("speak")}
-                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                                                        answerMode === "speak"
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${answerMode === "speak"
                                                             ? "bg-[#1E2540] text-[#C4B5FD]"
                                                             : "text-[#737C8E] hover:text-[#C7CBD5]"
-                                                    }`}
+                                                        }`}
                                                 >
                                                     🎙 Speak
                                                 </button>
