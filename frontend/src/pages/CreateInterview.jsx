@@ -39,6 +39,12 @@ function CreateInterview() {
     const [category, setCategory] =
         useState("");
 
+    const [categorySearch, setCategorySearch] =
+        useState("");
+
+    const [showCategoryResults, setShowCategoryResults] =
+        useState(false);
+
     // ==========================================
     // TOPIC STATE
     // ==========================================
@@ -199,8 +205,22 @@ function CreateInterview() {
 
         if (categoryExists) {
             setCategory(categoryFromUrl);
+
+            const selectedCategory =
+                categories.find(
+                    (item) =>
+                        item.value ===
+                        categoryFromUrl
+                );
+
+            setCategorySearch(
+                selectedCategory?.label || ""
+            );
+            setShowCategoryResults(false);
         } else {
             setCategory("");
+            setCategorySearch("");
+            setShowCategoryResults(false);
         }
     }, [
         categories,
@@ -339,6 +359,18 @@ function CreateInterview() {
         setCategory(
             selectedCategory
         );
+
+        const selectedCategoryItem =
+            categories.find(
+                (item) =>
+                    item.value ===
+                    selectedCategory
+            );
+
+        setCategorySearch(
+            selectedCategoryItem?.label || ""
+        );
+        setShowCategoryResults(false);
 
         setTopic("");
         setTopicSearch("");
@@ -540,6 +572,19 @@ function CreateInterview() {
                 "Advanced concepts",
         },
     ];
+
+    // ==========================================
+    // FILTERED CATEGORY SUGGESTIONS
+    // ==========================================
+
+    const filteredCategories =
+        categories.filter((item) =>
+            item.label
+                .toLowerCase()
+                .includes(
+                    categorySearch.trim().toLowerCase()
+                )
+        );
 
     // ==========================================
     // CURRENT CATEGORY
@@ -883,61 +928,192 @@ function CreateInterview() {
                             Choose the area you want to practice.
                         </p>
 
-                        <select
-                            id="category"
-                            value={category}
-                            onChange={(event) =>
-                                handleCategorySelect(
-                                    event.target.value
-                                )
-                            }
-                            disabled={
-                                categoriesLoading
-                            }
-                            className="
-                                w-full
-                                bg-[#0B1020]
-                                border
-                                border-[#293452]
-                                rounded-xl
-                                px-4
-                                py-3.5
-                                text-sm
-                                text-[#D8DCE5]
-                                outline-none
-                                focus:border-[#6366F1]
-                                focus:ring-1
-                                focus:ring-[#6366F1]/20
-                                cursor-pointer
-                                disabled:opacity-50
-                            "
-                        >
+                        <div className="relative">
 
-                            <option value="">
-                                {categoriesLoading
-                                    ? "Loading categories..."
-                                    : "Select a category"}
-                            </option>
+                            <div
+                                className="
+                                    absolute
+                                    left-4
+                                    top-1/2
+                                    -translate-y-1/2
+                                    text-[#5E687C]
+                                    pointer-events-none
+                                "
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.8"
+                                    className="w-5 h-5"
+                                >
+                                    <circle
+                                        cx="11"
+                                        cy="11"
+                                        r="6.5"
+                                    />
+                                    <path
+                                        strokeLinecap="round"
+                                        d="M16 16l4.5 4.5"
+                                    />
+                                </svg>
+                            </div>
 
-                            {categories.map(
-                                (item) => (
-                                    <option
-                                        key={
-                                            item.value
-                                        }
-                                        value={
-                                            item.value
-                                        }
-                                        className="bg-[#11182B]"
+                            <input
+                                id="category"
+                                type="text"
+                                value={categorySearch}
+                                onChange={(event) => {
+                                    const value =
+                                        event.target.value;
+
+                                    setCategorySearch(value);
+                                    setShowCategoryResults(
+                                        Boolean(value.trim())
+                                    );
+
+                                    // A category is considered selected only
+                                    // after the user chooses a suggestion.
+                                    if (category) {
+                                        setCategory("");
+                                        setTopic("");
+                                        setTopicSearch("");
+                                        setTopics([]);
+                                        setShowTopicResults(false);
+                                    }
+
+                                    setError("");
+                                }}
+                                onFocus={() => {
+                                    if (categorySearch.trim()) {
+                                        setShowCategoryResults(true);
+                                    }
+                                }}
+                                disabled={categoriesLoading}
+                                placeholder={
+                                    categoriesLoading
+                                        ? "Loading categories..."
+                                        : "Type to search categories, e.g. DSA, Backend..."
+                                }
+                                className="
+                                    w-full
+                                    bg-[#0B1020]
+                                    border
+                                    border-[#293452]
+                                    rounded-xl
+                                    pl-12
+                                    pr-4
+                                    py-3.5
+                                    text-sm
+                                    text-[#D8DCE5]
+                                    placeholder:text-[#545D70]
+                                    outline-none
+                                    focus:border-[#6366F1]
+                                    focus:ring-1
+                                    focus:ring-[#6366F1]/20
+                                    transition
+                                    disabled:opacity-50
+                                    disabled:cursor-not-allowed
+                                "
+                            />
+
+                            {showCategoryResults &&
+                                categorySearch.trim() &&
+                                !categoriesLoading && (
+                                    <div
+                                        className="
+                                            absolute
+                                            left-0
+                                            right-0
+                                            top-full
+                                            mt-2
+                                            z-30
+                                            bg-[#11182B]
+                                            border
+                                            border-[#303A56]
+                                            rounded-xl
+                                            shadow-2xl
+                                            shadow-black/30
+                                            overflow-hidden
+                                        "
                                     >
-                                        {
-                                            item.label
-                                        }
-                                    </option>
-                                )
-                            )}
+                                        {filteredCategories.length > 0 ? (
+                                            <div className="max-h-72 overflow-y-auto py-2">
+                                                {filteredCategories.map((item) => {
+                                                    const selected =
+                                                        category === item.value;
 
-                        </select>
+                                                    return (
+                                                        <button
+                                                            key={item.value}
+                                                            type="button"
+                                                            onClick={() =>
+                                                                handleCategorySelect(
+                                                                    item.value
+                                                                )
+                                                            }
+                                                            className={`
+                                                                w-full
+                                                                px-4
+                                                                py-3
+                                                                text-left
+                                                                flex
+                                                                items-center
+                                                                justify-between
+                                                                gap-4
+                                                                transition
+                                                                ${selected
+                                                                    ? "bg-[#1E2540] text-[#C4B5FD]"
+                                                                    : "text-[#B8BFCD] hover:bg-[#151D33] hover:text-[#E5E7EB]"
+                                                                }
+                                                            `}
+                                                        >
+                                                            <div className="min-w-0">
+                                                                <p className="text-sm truncate">
+                                                                    {item.label}
+                                                                </p>
+                                                                {item.description && (
+                                                                    <p className="text-xs text-[#667085] mt-1 truncate">
+                                                                        {item.description}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+
+                                                            {selected && (
+                                                                <svg
+                                                                    xmlns="http://www.w3.org/2000/svg"
+                                                                    viewBox="0 0 24 24"
+                                                                    fill="none"
+                                                                    stroke="currentColor"
+                                                                    strokeWidth="2"
+                                                                    className="w-4 h-4 shrink-0 text-[#8B5CF6]"
+                                                                >
+                                                                    <path
+                                                                        strokeLinecap="round"
+                                                                        strokeLinejoin="round"
+                                                                        d="M5 12.5l4 4L19 7"
+                                                                    />
+                                                                </svg>
+                                                            )}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <div className="px-5 py-5">
+                                                <p className="text-sm text-[#8992A4]">
+                                                    No matching categories found.
+                                                </p>
+                                                <p className="text-xs text-[#606A7D] mt-1">
+                                                    Try another keyword.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                        </div>
 
                     </div>
 

@@ -20,14 +20,27 @@ import json
 from datetime import datetime
 from sqlalchemy import func
 from fastapi import Query
+from pydantic import BaseModel
+from typing import Literal
 from app.data.technical_topics import (
     get_all_categories,
     get_topics_for_category,
     search_topics,
     normalize_category,
+    is_valid_topic,
 )
 
 router = APIRouter()
+
+
+class CustomTopicInterviewCreate(BaseModel):
+    """Request used when a topic is not present in the technical topic catalogue."""
+
+    category: str
+    topic: str
+    difficulty: Literal["easy", "medium", "hard"]
+    interview_mode: Literal["timed", "untimed"] = "untimed"
+
 
 QUESTION_TIMES = {
     "easy": 180,      # 3 minutes
@@ -86,12 +99,33 @@ def create_interview(
     db: Session = Depends(get_db),
 ):
     # =========================================================
-    # 1. CREATE INTERVIEW
+    # 1. VERIFY TOPIC EXISTS IN THE TECHNICAL CATALOGUE
+    # =========================================================
+
+    topic = interview_data.topic.strip()
+
+    if not topic:
+        raise HTTPException(
+            status_code=400,
+            detail="Please enter a valid technical interview topic.",
+        )
+
+    # Normal interview creation is only for topics already present
+    # in technical_topics.py. Unknown topics should use the
+    # /custom-topic endpoint from the \"Can't find your topic?\" flow.
+    if not is_valid_topic(topic):
+        raise HTTPException(
+            status_code=404,
+            detail="Topic not found in the technical catalogue. Use the custom topic option to enter it.",
+        )
+
+    # =========================================================
+    # 2. CREATE INTERVIEW
     # =========================================================
 
     interview = Interview(
         user_id=user_id,
-        topic=interview_data.topic,
+        topic=topic,
         difficulty=interview_data.difficulty,
         interview_mode=interview_data.interview_mode,
         question_time_seconds=(
@@ -205,6 +239,246 @@ Rules:
         "topic": interview.topic,
         "difficulty": interview.difficulty,
         "status": interview.status,
+    }
+
+
+@router.post("/custom-topic")
+def create_custom_topic_interview(
+    interview_data: CustomTopicInterviewCreate,
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Custom-topic flow.
+
+    The frontend reaches this endpoint only after the user searched the
+    existing catalogue and the topic was not found.
+
+    One Gemini call performs both:
+    1. technical/software-topic validation
+    2. interview-question generation
+
+    Invalid topics are rejected before an Interview row is created.
+    """
+
+    topic = interview_data.topic.strip()
+
+    if not topic:
+        raise HTTPException(
+            status_code=400,
+            detail="Please enter a topic.",
+        )
+
+    normalized_category = normalize_category(
+        interview_data.category
+    )
+
+    if not normalized_category:
+        raise HTTPException(
+            status_code=404,
+            detail="Technical category not found.",
+        )
+
+    # A custom topic must genuinely be new. Existing catalogue topics
+    # should continue through the normal search/select flow.
+    if is_valid_topic(topic):
+        raise HTTPException(
+            status_code=409,
+            detail="This topic already exists in the technical catalogue. Please select it from the topic suggestions.",
+        )
+
+    # =========================================================
+    # 1. GET PREVIOUS QUESTIONS
+    # =========================================================
+
+    existing_question_rows = (
+        db.query(Question.question_text)
+        .join(
+            Interview,
+            Question.interview_id == Interview.id
+        )
+        .filter(
+            Interview.user_id == user_id,
+            Interview.topic == topic,
+            Interview.difficulty == interview_data.difficulty,
+        )
+        .all()
+    )
+
+    existing_questions = [
+        row[0]
+        for row in existing_question_rows
+    ]
+
+    # =========================================================
+    # 2. SINGLE AI CALL: VALIDATE + GENERATE
+    # =========================================================
+
+    prompt = f"""
+You are an expert technical interviewer.
+
+User-entered topic:
+{topic}
+
+Selected category:
+{normalized_category}
+
+Difficulty:
+{interview_data.difficulty}
+
+First determine whether the user-entered topic is a legitimate
+software, programming, computer science, engineering, cloud,
+DevOps, data, AI/ML, security, or other technology interview topic.
+
+If it is NOT a valid software/technical interview topic:
+- Set "is_technical" to false.
+- Return an empty "questions" array.
+- Do not try to reinterpret an unrelated topic as technical.
+
+If it IS a valid software/technical interview topic:
+- Set "is_technical" to true.
+- Normalize the topic name into a concise, professional interview-topic name.
+- Generate exactly 5 interview questions for the normalized topic.
+- Questions must match the requested difficulty.
+- question_type must be "technical".
+- question_order must be 1, 2, 3, 4, 5.
+
+Return ONLY valid JSON in this exact structure:
+
+{{
+    "is_technical": true,
+    "normalized_topic": "Kubernetes Operators",
+    "questions": [
+        {{
+            "question_text": "question here",
+            "question_type": "technical",
+            "difficulty": "{interview_data.difficulty}",
+            "question_order": 1
+        }}
+    ]
+}}
+
+For an invalid topic, return:
+
+{{
+    "is_technical": false,
+    "normalized_topic": null,
+    "questions": []
+}}
+
+Rules:
+- Do not include markdown.
+- Do not include text outside the JSON.
+- Do not invent an unrelated technical interpretation for a
+  non-technical topic.
+"""
+
+    try:
+        ai_response = generate_text(
+            prompt,
+            existing_questions,
+        )
+        result = json.loads(ai_response)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=502,
+            detail="AI returned an invalid topic validation response.",
+        )
+    except Exception as exc:
+        print(f"CUSTOM TOPIC AI ERROR: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to validate and generate questions for this topic.",
+        )
+
+    is_technical = result.get("is_technical") is True
+    normalized_topic = (
+        str(result.get("normalized_topic") or "").strip()
+        if is_technical
+        else ""
+    )
+    questions_data = result.get("questions")
+
+    if not is_technical:
+        raise HTTPException(
+            status_code=422,
+            detail="Please enter a valid software or technical interview topic.",
+        )
+
+    if not normalized_topic:
+        raise HTTPException(
+            status_code=502,
+            detail="AI did not return a valid normalized topic.",
+        )
+
+    if not isinstance(questions_data, list) or len(questions_data) != 5:
+        raise HTTPException(
+            status_code=502,
+            detail="AI did not return exactly 5 interview questions.",
+        )
+
+    # Do not allow AI to turn a rejected/new topic into a duplicate
+    # of an existing catalogue topic without normalizing through the
+    # same catalogue flow.
+    if is_valid_topic(normalized_topic):
+        raise HTTPException(
+            status_code=409,
+            detail="This topic already exists in the technical catalogue. Please use the existing topic instead.",
+        )
+
+    # =========================================================
+    # 3. CREATE INTERVIEW ONLY AFTER VALIDATION SUCCEEDS
+    # =========================================================
+
+    interview = Interview(
+        user_id=user_id,
+        topic=normalized_topic,
+        difficulty=interview_data.difficulty,
+        interview_mode=interview_data.interview_mode,
+        question_time_seconds=(
+            QUESTION_TIMES[interview_data.difficulty]
+            if interview_data.interview_mode == "timed"
+            else None
+        ),
+    )
+
+    db.add(interview)
+    db.commit()
+    db.refresh(interview)
+
+    # =========================================================
+    # 4. SAVE GENERATED QUESTIONS
+    # =========================================================
+
+    try:
+        for question in questions_data:
+            new_question = Question(
+                interview_id=interview.id,
+                question_text=question["question_text"],
+                question_type="technical",
+                difficulty=interview_data.difficulty,
+                question_order=question["question_order"],
+            )
+            db.add(new_question)
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to save generated interview questions.",
+        )
+
+    return {
+        "id": str(interview.id),
+        "topic": interview.topic,
+        "difficulty": interview.difficulty,
+        "status": interview.status,
+        "interview_mode": interview.interview_mode,
+        "question_time_seconds": interview.question_time_seconds,
+        "topic_source": "custom",
+        "catalogue_update_required": True,
+        "catalogue_category": normalized_category,
     }
 
 
