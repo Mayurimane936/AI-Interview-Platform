@@ -1214,15 +1214,15 @@ function Interview() {
                         logout
                     );
 
-                console.log(
-                    "INTERVIEW:",
-                    interviewData
-                );
+                // console.log(
+                //     "INTERVIEW:",
+                //     interviewData
+                // );
 
-                console.log(
-                    "QUESTIONS:",
-                    questionData
-                );
+                // console.log(
+                //     "QUESTIONS:",
+                //     questionData
+                // );
 
                 setInterview(interviewData);
 
@@ -1285,7 +1285,7 @@ function Interview() {
                 logout
             );
 
-            console.log("INTERVIEW STARTED:", data);
+            // console.log("INTERVIEW STARTED:", data);
 
             // Do not speak Question 1 here. Changing the interview status to
             // `in_progress` triggers the question TTS effect below, which is
@@ -1383,10 +1383,10 @@ function Interview() {
                 logout
             );
 
-            console.log(
-                "ANSWER SAVED:",
-                answerData
-            );
+            // console.log(
+            //     "ANSWER SAVED:",
+            //     answerData
+            // );
 
             // =================================================
             // STEP 2
@@ -1415,10 +1415,10 @@ function Interview() {
                         logout
                     );
 
-                console.log(
-                    "ANSWER EVALUATED:",
-                    evaluationData
-                );
+                // console.log(
+                //     "ANSWER EVALUATED:",
+                //     evaluationData
+                // );
 
                 // =================================================
                 // STEP 4
@@ -1494,10 +1494,10 @@ function Interview() {
             setEvaluationError("");
             setError("");
 
-            console.log(
-                "RETRYING EVALUATION FOR ANSWER:",
-                answerData.id
-            );
+            // console.log(
+            //     "RETRYING EVALUATION FOR ANSWER:",
+            //     answerData.id
+            // );
 
             const evaluationData =
                 await evaluateAnswer(
@@ -1507,10 +1507,10 @@ function Interview() {
                     logout
                 );
 
-            console.log(
-                "RETRY EVALUATION SUCCESS:",
-                evaluationData
-            );
+            // console.log(
+            //     "RETRY EVALUATION SUCCESS:",
+            //     evaluationData
+            // );
 
             setSubmittedAnswers((previous) => ({
                 ...previous,
@@ -1572,10 +1572,10 @@ function Interview() {
                 logout
             );
 
-            console.log(
-                "INTERVIEW COMPLETED:",
-                data
-            );
+            // console.log(
+            //     "INTERVIEW COMPLETED:",
+            //     data
+            // );
 
             navigate(
                 `/interview/${interviewId}/result`

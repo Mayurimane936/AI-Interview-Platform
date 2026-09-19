@@ -23,9 +23,9 @@ export async function apiRequest(
   // =========================================================
 
   if (response.status === 401) {
-    console.log(
-      "Token expired or invalid. Logging out..."
-    );
+    // console.log(
+    //   "Token expired or invalid. Logging out..."
+    // );
 
     if (logout) {
       logout();

@@ -83,7 +83,7 @@ function Dashboard() {
           );
         }
 
-        console.log("DASHBOARD STATS:", data);
+        // console.log("DASHBOARD STATS:", data);
 
         setStats(data);
       } catch (err) {
@@ -271,10 +271,10 @@ function Dashboard() {
         );
       }
 
-      console.log(
-        "BULK DELETE RESPONSE:",
-        data
-      );
+      // console.log(
+      //   "BULK DELETE RESPONSE:",
+      //   data
+      // );
 
       setSelectedInterviewIds([]);
       setBulkDeleteOpen(false);

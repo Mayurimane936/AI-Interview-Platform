@@ -69,9 +69,9 @@ export function AuthProvider({ children }) {
 
         // Token expired / invalid
         if (response.status === 401) {
-          console.log(
-            "Session expired. Logging out..."
-          );
+          // console.log(
+          //   "Session expired. Logging out..."
+          // );
 
           localStorage.removeItem(
             "access_token"
@@ -92,9 +92,9 @@ export function AuthProvider({ children }) {
           return;
         }
 
-        console.log(
-          "Existing session is valid."
-        );
+        // console.log(
+        //   "Existing session is valid."
+        // );
 
       } catch (error) {
         console.error(

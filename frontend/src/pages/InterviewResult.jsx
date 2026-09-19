@@ -50,10 +50,10 @@ function InterviewResult() {
           );
         }
 
-        console.log(
-          "INTERVIEW RESULT:",
-          data
-        );
+        // console.log(
+        //   "INTERVIEW RESULT:",
+        //   data
+        // );
 
         setResult(data);
       } catch (err) {

@@ -5,7 +5,7 @@ export async function createInterview(
   interviewData,
   logout = null
 ) {
-  console.log("TOKEN SENT TO API:", token);
+//   console.log("TOKEN SENT TO API:", token); 
 
   return apiRequest(
     "/interviews",
