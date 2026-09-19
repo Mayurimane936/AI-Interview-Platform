@@ -1,4 +1,9 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
 
 import { AuthProvider } from "./context/AuthContext";
 
@@ -15,9 +20,30 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Login />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+
+          {/* =====================================================
+              PUBLIC ROUTES
+          ===================================================== */}
+
+          <Route
+            path="/"
+            element={<Login />}
+          />
+
+          <Route
+            path="/login"
+            element={<Login />}
+          />
+
+          <Route
+            path="/register"
+            element={<Register />}
+          />
+
+          {/* =====================================================
+              PROTECTED ROUTES
+          ===================================================== */}
+
           <Route
             path="/dashboard"
             element={
@@ -26,6 +52,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/create-interview"
             element={
@@ -34,6 +61,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/interview/:interviewId"
             element={
@@ -42,6 +70,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/interview/:interviewId/result"
             element={
@@ -50,8 +79,22 @@ function App() {
               </ProtectedRoute>
             }
           />
-        </Routes>
 
+          {/* =====================================================
+              FALLBACK ROUTE
+          ===================================================== */}
+
+          <Route
+            path="*"
+            element={
+              <Navigate
+                to="/login"
+                replace
+              />
+            }
+          />
+
+        </Routes>
       </BrowserRouter>
     </AuthProvider>
   );

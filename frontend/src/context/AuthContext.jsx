@@ -49,8 +49,9 @@ export function AuthProvider({ children }) {
       const storedToken =
         localStorage.getItem("access_token");
 
-      // No token = not logged in
+      // No token = user is not logged in
       if (!storedToken) {
+        setToken(null);
         setLoading(false);
         return;
       }
@@ -66,12 +67,11 @@ export function AuthProvider({ children }) {
           }
         );
 
-        // Token expired / invalid
-        if (response.status === 401) {
-          // console.log(
-          //   "Session expired. Logging out..."
-          // );
+        // =====================================================
+        // TOKEN EXPIRED / INVALID
+        // =====================================================
 
+        if (response.status === 401) {
           localStorage.removeItem(
             "access_token"
           );
@@ -81,7 +81,10 @@ export function AuthProvider({ children }) {
           return;
         }
 
-        // Other server error
+        // =====================================================
+        // OTHER SERVER ERROR
+        // =====================================================
+
         if (!response.ok) {
           console.error(
             "Session validation failed:",
@@ -91,10 +94,8 @@ export function AuthProvider({ children }) {
           return;
         }
 
-        // console.log(
-        //   "Existing session is valid."
-        // );
-
+        // Token is valid.
+        // Keep the existing token.
       } catch (error) {
         console.error(
           "SESSION VALIDATION ERROR:",
