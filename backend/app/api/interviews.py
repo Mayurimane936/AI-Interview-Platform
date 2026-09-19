@@ -19,6 +19,7 @@ from app.services.gemini import generate_text, evaluate_answer
 import json
 from datetime import datetime
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from fastapi import Query
 from pydantic import BaseModel
 from typing import Literal
@@ -36,7 +37,6 @@ router = APIRouter()
 class CustomTopicInterviewCreate(BaseModel):
     """Request used when a topic is not present in the technical topic catalogue."""
 
-    category: str
     topic: str
     difficulty: Literal["easy", "medium", "hard"]
     interview_mode: Literal["timed", "untimed"] = "untimed"
@@ -47,6 +47,87 @@ QUESTION_TIMES = {
     "medium": 300,    # 5 minutes
     "hard": 480,      # 8 minutes
 }
+
+
+def _extract_category_name(category) -> str | None:
+    """Extract a stable category value/name from the catalogue representation.
+
+    The topic catalogue may return category objects such as:
+        {"value": "dsa", "label": "Data Structures & Algorithms", ...}
+
+    Topic validation/search functions operate on the category value/name, so
+    prefer stable identifiers before human-readable labels.
+    """
+    if isinstance(category, str):
+        value = category.strip()
+        return value or None
+
+    if isinstance(category, dict):
+        for key in (
+            "value",
+            "slug",
+            "key",
+            "code",
+            "category",
+            "name",
+            "label",
+            "title",
+        ):
+            value = category.get(key)
+
+            if isinstance(value, str):
+                value = value.strip()
+                if value:
+                    return value
+
+            if isinstance(value, dict):
+                nested = _extract_category_name(value)
+                if nested:
+                    return nested
+
+    return None
+
+
+def _extract_category_label(category, fallback: str | None = None) -> str:
+    """Return the user-facing category label."""
+    if isinstance(category, str):
+        value = category.strip()
+        return value or (fallback or "")
+
+    if isinstance(category, dict):
+        for key in ("label", "name", "title", "category", "value"):
+            value = category.get(key)
+
+            if isinstance(value, str):
+                value = value.strip()
+                if value:
+                    return value
+
+            if isinstance(value, dict):
+                nested = _extract_category_label(value, fallback)
+                if nested:
+                    return nested
+
+    return fallback or ""
+
+
+def topic_exists_in_catalogue(topic: str) -> bool:
+    """Return True when a topic exists under any technical catalogue category."""
+    topic = topic.strip()
+
+    if not topic:
+        return False
+
+    for category in get_all_categories():
+        category_name = _extract_category_name(category)
+
+        if not category_name:
+            continue
+
+        if is_valid_topic(category_name, topic):
+            return True
+
+    return False
 # =========================================================
 # TECHNICAL CATEGORIES
 # =========================================================
@@ -92,6 +173,117 @@ def get_interview_topics(
 
 
 
+
+# =========================================================
+# TOPIC-FIRST SEARCH
+# =========================================================
+
+@router.get("/topic-search")
+def search_interview_topics(
+    search: str = Query(..., min_length=1),
+):
+    """
+    Search the entire technical catalogue by topic.
+
+    The frontend does not need to know the category before searching.
+    Every matching topic is returned together with the category that owns it.
+
+    Example:
+        /interviews/topic-search?search=tree
+
+    Response:
+        {
+            "query": "tree",
+            "results": [
+                {
+                    "topic": "Tree",
+                    "category": "dsa",
+                    "category_label": "Data Structures & Algorithms"
+                }
+            ]
+        }
+    """
+    search_value = search.strip()
+
+    if not search_value:
+        return {
+            "query": "",
+            "results": [],
+        }
+
+    results = []
+    seen = set()
+
+    for category in get_all_categories():
+        category_value = _extract_category_name(category)
+
+        if not category_value:
+            continue
+
+        normalized_category = normalize_category(category_value)
+
+        if not normalized_category:
+            continue
+
+        category_label = _extract_category_label(
+            category,
+            fallback=normalized_category,
+        )
+
+        try:
+            matching_topics = search_topics(
+                search_value,
+                normalized_category,
+            )
+        except Exception as exc:
+            print(
+                f"TOPIC SEARCH ERROR for category "
+                f"{normalized_category}: {exc}"
+            )
+            continue
+
+        for topic in matching_topics or []:
+            if not isinstance(topic, str):
+                continue
+
+            clean_topic = topic.strip()
+
+            if not clean_topic:
+                continue
+
+            dedupe_key = clean_topic.casefold()
+
+            if dedupe_key in seen:
+                continue
+
+            seen.add(dedupe_key)
+
+            results.append(
+                {
+                    "topic": clean_topic,
+                    "category": normalized_category,
+                    "category_label": category_label,
+                }
+            )
+
+    # Prefer exact matches and then shorter topic names.
+    query_key = search_value.casefold()
+
+    results.sort(
+        key=lambda item: (
+            0 if item["topic"].casefold() == query_key else 1,
+            0 if item["topic"].casefold().startswith(query_key) else 1,
+            len(item["topic"]),
+            item["topic"].casefold(),
+        )
+    )
+
+    return {
+        "query": search_value,
+        "results": results[:15],
+    }
+
+
 @router.post("")
 def create_interview(
     interview_data: InterviewCreate,
@@ -113,7 +305,7 @@ def create_interview(
     # Normal interview creation is only for topics already present
     # in technical_topics.py. Unknown topics should use the
     # /custom-topic endpoint from the \"Can't find your topic?\" flow.
-    if not is_valid_topic(topic):
+    if not topic_exists_in_catalogue(topic):
         raise HTTPException(
             status_code=404,
             detail="Topic not found in the technical catalogue. Use the custom topic option to enter it.",
@@ -251,16 +443,12 @@ def create_custom_topic_interview(
     """
     Custom-topic flow.
 
-    The frontend reaches this endpoint only after the user searched the
-    existing catalogue and the topic was not found.
+    The frontend reaches this endpoint only after the existing catalogue
+    search could not find the topic.
 
-    One Gemini call performs both:
-    1. technical/software-topic validation
-    2. interview-question generation
-
-    Invalid topics are rejected before an Interview row is created.
+    One Gemini call validates the topic, identifies its category,
+    normalizes its name, and generates the interview questions.
     """
-
     topic = interview_data.topic.strip()
 
     if not topic:
@@ -269,34 +457,19 @@ def create_custom_topic_interview(
             detail="Please enter a topic.",
         )
 
-    normalized_category = normalize_category(
-        interview_data.category
-    )
-
-    if not normalized_category:
-        raise HTTPException(
-            status_code=404,
-            detail="Technical category not found.",
-        )
-
-    # A custom topic must genuinely be new. Existing catalogue topics
-    # should continue through the normal search/select flow.
-    if is_valid_topic(topic):
+    # Known topics must use the existing catalogue flow. No AI call needed.
+    if topic_exists_in_catalogue(topic):
         raise HTTPException(
             status_code=409,
-            detail="This topic already exists in the technical catalogue. Please select it from the topic suggestions.",
+            detail=(
+                "This topic already exists in the technical catalogue. "
+                "Please select it from the topic suggestions."
+            ),
         )
-
-    # =========================================================
-    # 1. GET PREVIOUS QUESTIONS
-    # =========================================================
 
     existing_question_rows = (
         db.query(Question.question_text)
-        .join(
-            Interview,
-            Question.interview_id == Interview.id
-        )
+        .join(Interview, Question.interview_id == Interview.id)
         .filter(
             Interview.user_id == user_id,
             Interview.topic == topic,
@@ -305,79 +478,93 @@ def create_custom_topic_interview(
         .all()
     )
 
-    existing_questions = [
-        row[0]
-        for row in existing_question_rows
-    ]
-
-    # =========================================================
-    # 2. SINGLE AI CALL: VALIDATE + GENERATE
-    # =========================================================
+    existing_questions = [row[0] for row in existing_question_rows]
 
     prompt = f"""
-You are an expert technical interviewer.
+You are an expert technical interviewer and software taxonomy classifier.
 
 User-entered topic:
 {topic}
 
-Selected category:
-{normalized_category}
-
 Difficulty:
 {interview_data.difficulty}
 
-First determine whether the user-entered topic is a legitimate
-software, programming, computer science, engineering, cloud,
-DevOps, data, AI/ML, security, or other technology interview topic.
+Determine whether the topic is a legitimate software or technical
+interview topic. Valid areas include programming, computer science,
+backend, frontend, databases, cloud, DevOps, networking, operating
+systems, system design, AI/ML, security, testing, developer tools,
+and related technology fields.
 
-If it is NOT a valid software/technical interview topic:
-- Set "is_technical" to false.
-- Return an empty "questions" array.
-- Do not try to reinterpret an unrelated topic as technical.
+If it is NOT technical:
+- is_technical must be false
+- normalized_topic must be null
+- category must be null
+- questions must be []
 
-If it IS a valid software/technical interview topic:
-- Set "is_technical" to true.
-- Normalize the topic name into a concise, professional interview-topic name.
-- Generate exactly 5 interview questions for the normalized topic.
-- Questions must match the requested difficulty.
-- question_type must be "technical".
-- question_order must be 1, 2, 3, 4, 5.
+If it IS technical:
+- is_technical must be true
+- normalized_topic must be a concise professional topic name
+- category must be the most appropriate category from the existing
+  technical interview catalogue
+- generate exactly 5 technical interview questions
+- match the requested difficulty
+- question_type must be "technical"
+- question_order must be 1, 2, 3, 4, 5
 
-Return ONLY valid JSON in this exact structure:
+Return ONLY valid JSON.
 
+Example valid response:
 {{
-    "is_technical": true,
-    "normalized_topic": "Kubernetes Operators",
-    "questions": [
-        {{
-            "question_text": "question here",
-            "question_type": "technical",
-            "difficulty": "{interview_data.difficulty}",
-            "question_order": 1
-        }}
-    ]
+  "is_technical": true,
+  "normalized_topic": "Kubernetes Operators",
+  "category": "devops",
+  "questions": [
+    {{
+      "question_text": "question here",
+      "question_type": "technical",
+      "difficulty": "{interview_data.difficulty}",
+      "question_order": 1
+    }},
+    {{
+      "question_text": "question here",
+      "question_type": "technical",
+      "difficulty": "{interview_data.difficulty}",
+      "question_order": 2
+    }},
+    {{
+      "question_text": "question here",
+      "question_type": "technical",
+      "difficulty": "{interview_data.difficulty}",
+      "question_order": 3
+    }},
+    {{
+      "question_text": "question here",
+      "question_type": "technical",
+      "difficulty": "{interview_data.difficulty}",
+      "question_order": 4
+    }},
+    {{
+      "question_text": "question here",
+      "question_type": "technical",
+      "difficulty": "{interview_data.difficulty}",
+      "question_order": 5
+    }}
+  ]
 }}
 
-For an invalid topic, return:
-
+Example invalid response:
 {{
-    "is_technical": false,
-    "normalized_topic": null,
-    "questions": []
+  "is_technical": false,
+  "normalized_topic": null,
+  "category": null,
+  "questions": []
 }}
 
-Rules:
-- Do not include markdown.
-- Do not include text outside the JSON.
-- Do not invent an unrelated technical interpretation for a
-  non-technical topic.
+Do not include markdown or any text outside the JSON.
 """
 
     try:
-        ai_response = generate_text(
-            prompt,
-            existing_questions,
-        )
+        ai_response = generate_text(prompt, existing_questions)
         result = json.loads(ai_response)
     except json.JSONDecodeError:
         raise HTTPException(
@@ -391,24 +578,26 @@ Rules:
             detail="Unable to validate and generate questions for this topic.",
         )
 
-    is_technical = result.get("is_technical") is True
-    normalized_topic = (
-        str(result.get("normalized_topic") or "").strip()
-        if is_technical
-        else ""
-    )
-    questions_data = result.get("questions")
-
-    if not is_technical:
+    if result.get("is_technical") is not True:
         raise HTTPException(
             status_code=422,
             detail="Please enter a valid software or technical interview topic.",
         )
 
+    normalized_topic = str(result.get("normalized_topic") or "").strip()
+    ai_category = str(result.get("category") or "").strip()
+    questions_data = result.get("questions")
+
     if not normalized_topic:
         raise HTTPException(
             status_code=502,
             detail="AI did not return a valid normalized topic.",
+        )
+
+    if not ai_category:
+        raise HTTPException(
+            status_code=502,
+            detail="AI could not determine a technical category for this topic.",
         )
 
     if not isinstance(questions_data, list) or len(questions_data) != 5:
@@ -417,18 +606,23 @@ Rules:
             detail="AI did not return exactly 5 interview questions.",
         )
 
-    # Do not allow AI to turn a rejected/new topic into a duplicate
-    # of an existing catalogue topic without normalizing through the
-    # same catalogue flow.
-    if is_valid_topic(normalized_topic):
+    # Backend verifies the category instead of trusting the AI blindly.
+    normalized_category = normalize_category(ai_category)
+    if not normalized_category:
         raise HTTPException(
-            status_code=409,
-            detail="This topic already exists in the technical catalogue. Please use the existing topic instead.",
+            status_code=502,
+            detail="AI returned a category that is not supported by the technical catalogue.",
         )
 
-    # =========================================================
-    # 3. CREATE INTERVIEW ONLY AFTER VALIDATION SUCCEEDS
-    # =========================================================
+    # Guard against the AI normalizing the custom topic into an existing topic.
+    if topic_exists_in_catalogue(normalized_topic):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This topic already exists in the technical catalogue. "
+                "Please select it from the topic suggestions."
+            ),
+        )
 
     interview = Interview(
         user_id=user_id,
@@ -446,21 +640,17 @@ Rules:
     db.commit()
     db.refresh(interview)
 
-    # =========================================================
-    # 4. SAVE GENERATED QUESTIONS
-    # =========================================================
-
     try:
         for question in questions_data:
-            new_question = Question(
-                interview_id=interview.id,
-                question_text=question["question_text"],
-                question_type="technical",
-                difficulty=interview_data.difficulty,
-                question_order=question["question_order"],
+            db.add(
+                Question(
+                    interview_id=interview.id,
+                    question_text=question["question_text"],
+                    question_type="technical",
+                    difficulty=interview_data.difficulty,
+                    question_order=question["question_order"],
+                )
             )
-            db.add(new_question)
-
         db.commit()
     except Exception:
         db.rollback()
@@ -477,7 +667,6 @@ Rules:
         "interview_mode": interview.interview_mode,
         "question_time_seconds": interview.question_time_seconds,
         "topic_source": "custom",
-        "catalogue_update_required": True,
         "catalogue_category": normalized_category,
     }
 

@@ -14,9 +14,6 @@ function CreateInterview() {
     const { token, logout } = useAuth();
     const [searchParams] = useSearchParams();
 
-    const categoryFromUrl =
-        searchParams.get("category");
-
     const topicFromUrl =
         searchParams.get("topic");
 
@@ -25,25 +22,6 @@ function CreateInterview() {
 
     const interviewModeFromUrl =
         searchParams.get("interview_mode");
-
-    // ==========================================
-    // CATEGORY STATE
-    // ==========================================
-
-    const [categories, setCategories] =
-        useState([]);
-
-    const [categoriesLoading, setCategoriesLoading] =
-        useState(true);
-
-    const [category, setCategory] =
-        useState("");
-
-    const [categorySearch, setCategorySearch] =
-        useState("");
-
-    const [showCategoryResults, setShowCategoryResults] =
-        useState(false);
 
     // ==========================================
     // TOPIC STATE
@@ -62,6 +40,31 @@ function CreateInterview() {
 
     const [showTopicResults, setShowTopicResults] =
         useState(false);
+
+    // ==========================================
+    // SELECTED CATEGORY METADATA
+    // ==========================================
+
+    // Category is detected by the backend.
+    // It is NOT a user input anymore.
+    const [selectedCategory, setSelectedCategory] =
+        useState(null);
+
+    // ==========================================
+    // CUSTOM TOPIC STATE
+    // ==========================================
+
+    const [showCustomTopicModal, setShowCustomTopicModal] =
+        useState(false);
+
+    const [customTopic, setCustomTopic] =
+        useState("");
+
+    const [customTopicLoading, setCustomTopicLoading] =
+        useState(false);
+
+    const [customTopicError, setCustomTopicError] =
+        useState("");
 
     // ==========================================
     // OTHER STATE
@@ -91,52 +94,11 @@ function CreateInterview() {
     const [error, setError] =
         useState("");
 
-    const [recentPractice, setRecentPractice] = useState([]);
-    const [recentPracticeLoading, setRecentPracticeLoading] = useState(true);
+    const [recentPractice, setRecentPractice] =
+        useState([]);
 
-    // ==========================================
-    // LOAD CATEGORIES
-    // ==========================================
-
-    useEffect(() => {
-        const loadCategories = async () => {
-            try {
-                setCategoriesLoading(true);
-
-                const response = await fetch(
-                    `${API_URL}/interviews/categories`
-                );
-
-                const data =
-                    await response.json();
-
-                if (!response.ok) {
-                    throw new Error(
-                        data.detail ||
-                        "Failed to load categories"
-                    );
-                }
-
-                setCategories(
-                    data.categories || []
-                );
-            } catch (err) {
-                console.error(
-                    "CATEGORY LOAD ERROR:",
-                    err
-                );
-
-                setError(
-                    err.message ||
-                    "Failed to load interview categories."
-                );
-            } finally {
-                setCategoriesLoading(false);
-            }
-        };
-
-        loadCategories();
-    }, []);
+    const [recentPracticeLoading, setRecentPracticeLoading] =
+        useState(true);
 
     // ==========================================
     // LOAD RECENT PRACTICE
@@ -189,93 +151,131 @@ function CreateInterview() {
     }, [token]);
 
     // ==========================================
-    // SET CATEGORY FROM URL
+    // LOAD TOPIC FROM URL
     // ==========================================
 
     useEffect(() => {
-        if (!categories.length) {
+        if (!topicFromUrl) {
             return;
         }
 
-        const categoryExists =
-            categories.some(
-                (item) =>
-                    item.value === categoryFromUrl
-            );
+        const trimmedTopic =
+            topicFromUrl.trim();
 
-        if (categoryExists) {
-            setCategory(categoryFromUrl);
+        if (!trimmedTopic) {
+            return;
+        }
 
-            const selectedCategory =
-                categories.find(
-                    (item) =>
-                        item.value ===
-                        categoryFromUrl
+        setTopic(trimmedTopic);
+        setTopicSearch(trimmedTopic);
+        setTopics([]);
+        setShowTopicResults(false);
+
+        // Resolve the category for a topic loaded
+        // through Recent Practice / URL.
+        const resolveTopicCategory = async () => {
+            try {
+                const params =
+                    new URLSearchParams();
+
+                params.set(
+                    "search",
+                    trimmedTopic
                 );
 
-            setCategorySearch(
-                selectedCategory?.label || ""
+                const response =
+                    await fetch(
+                        `${API_URL}/interviews/topic-search?${params.toString()}`
+                    );
+
+                const data =
+                    await response.json();
+
+                if (!response.ok) {
+                    return;
+                }
+
+                const results =
+                    data.results || [];
+
+                const exactMatch =
+                    results.find(
+                        (item) =>
+                            item?.topic
+                                ?.trim()
+                                .toLowerCase() ===
+                            trimmedTopic.toLowerCase()
+                    );
+
+                if (exactMatch) {
+                    setSelectedCategory({
+                        value:
+                            exactMatch.category,
+                        label:
+                            exactMatch.category_label,
+                    });
+                }
+            } catch (err) {
+                console.error(
+                    "TOPIC CATEGORY RESOLUTION ERROR:",
+                    err
+                );
+            }
+        };
+
+        resolveTopicCategory();
+    }, [topicFromUrl]);
+
+    // ==========================================
+    // LOAD DIFFICULTY / INTERVIEW MODE FROM URL
+    // ==========================================
+
+    useEffect(() => {
+        if (
+            ["easy", "medium", "hard"].includes(
+                difficultyFromUrl
+            )
+        ) {
+            setDifficulty(
+                difficultyFromUrl
             );
-            setShowCategoryResults(false);
-        } else {
-            setCategory("");
-            setCategorySearch("");
-            setShowCategoryResults(false);
+        }
+
+        if (
+            ["timed", "untimed"].includes(
+                interviewModeFromUrl
+            )
+        ) {
+            setInterviewMode(
+                interviewModeFromUrl
+            );
         }
     }, [
-        categories,
-        categoryFromUrl,
+        difficultyFromUrl,
+        interviewModeFromUrl,
     ]);
 
     // ==========================================
-    // LOAD TOPIC / DIFFICULTY / MODE FROM URL
+    // TOPIC SEARCH
     // ==========================================
 
     useEffect(() => {
-        if (!category || !topicFromUrl) {
-            return;
-        }
-
-        setTopic(topicFromUrl);
-        setTopicSearch(topicFromUrl);
-        setTopics([]);
-        setShowTopicResults(false);
-    }, [category, topicFromUrl]);
-
-    useEffect(() => {
-        if (["easy", "medium", "hard"].includes(difficultyFromUrl)) {
-            setDifficulty(difficultyFromUrl);
-        }
-
-        if (["timed", "untimed"].includes(interviewModeFromUrl)) {
-            setInterviewMode(interviewModeFromUrl);
-        }
-    }, [difficultyFromUrl, interviewModeFromUrl]);
-
-    // ==========================================
-    // LOAD TOPICS ONLY AFTER USER TYPES
-    // ==========================================
-
-    useEffect(() => {
-        if (!category) {
-            setTopics([]);
-            setTopicsLoading(false);
-            setShowTopicResults(false);
-            return;
-        }
-
         const searchValue =
             topicSearch.trim();
 
-        // A topic loaded from a recent-practice shortcut is already selected.
-        if (topic && topic.trim() === searchValue) {
+        // A selected topic is already resolved.
+        if (
+            topic &&
+            topic.trim().toLowerCase() ===
+            searchValue.toLowerCase()
+        ) {
             setTopics([]);
             setTopicsLoading(false);
             setShowTopicResults(false);
             return;
         }
 
-        // Do NOT show all topics when search is empty.
+        // Don't search for empty input.
         if (!searchValue) {
             setTopics([]);
             setTopicsLoading(false);
@@ -293,18 +293,13 @@ function CreateInterview() {
                         new URLSearchParams();
 
                     params.set(
-                        "category",
-                        category
-                    );
-
-                    params.set(
                         "search",
                         searchValue
                     );
 
                     const response =
                         await fetch(
-                            `${API_URL}/interviews/topics?${params.toString()}`
+                            `${API_URL}/interviews/topic-search?${params.toString()}`
                         );
 
                     const data =
@@ -313,26 +308,24 @@ function CreateInterview() {
                     if (!response.ok) {
                         throw new Error(
                             data.detail ||
-                            "Failed to load topics"
+                            "Failed to search topics"
                         );
                     }
 
                     setTopics(
-                        data.topics || []
+                        data.results || []
                     );
 
-                    setShowTopicResults(
-                        true
-                    );
+                    setShowTopicResults(true);
                 } catch (err) {
                     console.error(
-                        "TOPIC LOAD ERROR:",
+                        "TOPIC SEARCH ERROR:",
                         err
                     );
 
                     setError(
                         err.message ||
-                        "Failed to load topics."
+                        "Failed to search topics."
                     );
 
                     setTopics([]);
@@ -345,54 +338,9 @@ function CreateInterview() {
         return () =>
             clearTimeout(timeoutId);
     }, [
-        category,
+        topic,
         topicSearch,
     ]);
-
-    // ==========================================
-    // CATEGORY SELECT
-    // ==========================================
-
-    const handleCategorySelect = (
-        selectedCategory
-    ) => {
-        setCategory(
-            selectedCategory
-        );
-
-        const selectedCategoryItem =
-            categories.find(
-                (item) =>
-                    item.value ===
-                    selectedCategory
-            );
-
-        setCategorySearch(
-            selectedCategoryItem?.label || ""
-        );
-        setShowCategoryResults(false);
-
-        setTopic("");
-        setTopicSearch("");
-        setTopics([]);
-        setShowTopicResults(false);
-        setError("");
-
-        const params = new URLSearchParams();
-
-        if (selectedCategory) {
-            params.set("category", selectedCategory);
-        }
-
-        params.set("interview_mode", interviewMode);
-
-        navigate(
-            `/create-interview?${params.toString()}`,
-            {
-                replace: true,
-            }
-        );
-    };
 
     // ==========================================
     // TOPIC SELECT
@@ -401,11 +349,180 @@ function CreateInterview() {
     const handleTopicSelect = (
         selectedTopic
     ) => {
-        setTopic(selectedTopic);
-        setTopicSearch(selectedTopic);
+        if (!selectedTopic) {
+            return;
+        }
+
+        setTopic(
+            selectedTopic.topic
+        );
+
+        setTopicSearch(
+            selectedTopic.topic
+        );
+
+        setSelectedCategory({
+            value:
+                selectedTopic.category,
+            label:
+                selectedTopic.category_label,
+        });
+
+        setTopics([]);
         setShowTopicResults(false);
         setError("");
     };
+
+    // ==========================================
+    // CHANGE SELECTED TOPIC
+    // ==========================================
+
+    const handleChangeTopic = () => {
+        setTopic("");
+        setTopicSearch("");
+        setSelectedCategory(null);
+        setTopics([]);
+        setShowTopicResults(false);
+        setError("");
+    };
+
+    // ==========================================
+    // CUSTOM TOPIC
+    // ==========================================
+
+    const handleOpenCustomTopic = () => {
+        const searchedTopic =
+            topicSearch.trim();
+
+        setCustomTopic(
+            searchedTopic
+        );
+
+        setCustomTopicError("");
+        setError("");
+        setShowTopicResults(false);
+        setShowCustomTopicModal(true);
+    };
+
+    const handleCloseCustomTopic = () => {
+        if (customTopicLoading) {
+            return;
+        }
+
+        setShowCustomTopicModal(false);
+        setCustomTopic("");
+        setCustomTopicError("");
+    };
+
+    const handleCustomTopicSubmit =
+        async () => {
+            const trimmedTopic =
+                customTopic.trim();
+
+            setCustomTopicError("");
+            setError("");
+
+            if (!trimmedTopic) {
+                setCustomTopicError(
+                    "Please enter a valid software/technical topic."
+                );
+                return;
+            }
+
+            if (!token) {
+                setCustomTopicError(
+                    "Your session has expired. Please login again."
+                );
+                return;
+            }
+
+            setCustomTopicLoading(true);
+
+            try {
+                const response =
+                    await fetch(
+                        `${API_URL}/interviews/custom-topic`,
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type":
+                                    "application/json",
+                                Authorization:
+                                    `Bearer ${token}`,
+                            },
+                            body: JSON.stringify({
+                                topic:
+                                    trimmedTopic,
+                                difficulty,
+                                interview_mode:
+                                    interviewMode,
+                            }),
+                        }
+                    );
+
+                const data =
+                    await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.detail ||
+                        "The topic could not be verified."
+                    );
+                }
+
+                if (!data.id) {
+                    throw new Error(
+                        "The interview could not be created."
+                    );
+                }
+
+                setShowCustomTopicModal(
+                    false
+                );
+
+                setCustomTopic("");
+                setCustomTopicError("");
+
+                setTopic(
+                    data.topic ||
+                    trimmedTopic
+                );
+
+                setTopicSearch(
+                    data.topic ||
+                    trimmedTopic
+                );
+
+                // The custom-topic backend already
+                // identifies the category internally.
+                if (data.catalogue_category) {
+                    setSelectedCategory({
+                        value:
+                            data.catalogue_category,
+                        label:
+                            data.catalogue_category,
+                    });
+                }
+
+                navigate(
+                    `/interview/${data.id}`
+                );
+            } catch (err) {
+                console.error(
+                    "CUSTOM TOPIC ERROR:",
+                    err
+                );
+
+                setCustomTopicError(
+                    err.message ||
+                    "Failed to verify the custom topic."
+                );
+            } finally {
+                setCustomTopicLoading(
+                    false
+                );
+            }
+        };
 
     // ==========================================
     // CREATE INTERVIEW
@@ -415,13 +532,6 @@ function CreateInterview() {
         e.preventDefault();
 
         setError("");
-
-        if (!category) {
-            setError(
-                "Please select an interview category."
-            );
-            return;
-        }
 
         if (!topic.trim()) {
             setError(
@@ -444,9 +554,11 @@ function CreateInterview() {
                 await createInterview(
                     token,
                     {
-                        topic: topic.trim(),
+                        topic:
+                            topic.trim(),
                         difficulty,
-                        interview_mode: interviewMode,
+                        interview_mode:
+                            interviewMode,
                     },
                     logout
                 );
@@ -478,75 +590,45 @@ function CreateInterview() {
     // RECENT PRACTICE SELECT
     // ==========================================
 
-    const handleRecentPractice = async (item) => {
-        if (!item?.topic) {
-            return;
-        }
+    const handleRecentPractice =
+        async (item) => {
+            if (!item?.topic) {
+                return;
+            }
 
-        setError("");
+            setError("");
 
-        // Prefer category supplied by the backend.
-        let recentCategory = item.category;
+            const params =
+                new URLSearchParams();
 
-        // Older recent-practice responses may not contain category.
-        // Resolve it from the catalogue before navigating.
-        if (!recentCategory && categories.length) {
-            const normalizedTopic = item.topic.trim().toLowerCase();
+            params.set(
+                "topic",
+                item.topic
+            );
 
-            try {
-                for (const categoryItem of categories) {
-                    const params = new URLSearchParams();
-                    params.set("category", categoryItem.value);
-                    params.set("search", item.topic.trim());
-
-                    const response = await fetch(
-                        `${API_URL}/interviews/topics?${params.toString()}`
-                    );
-
-                    if (!response.ok) {
-                        continue;
-                    }
-
-                    const data = await response.json();
-                    const matchingTopics = data.topics || [];
-
-                    const exactMatch = matchingTopics.find(
-                        (value) =>
-                            value?.trim().toLowerCase() === normalizedTopic
-                    );
-
-                    if (exactMatch) {
-                        recentCategory = categoryItem.value;
-                        break;
-                    }
-                }
-            } catch (err) {
-                console.error(
-                    "RECENT PRACTICE CATEGORY RESOLUTION ERROR:",
-                    err
+            if (item.difficulty) {
+                params.set(
+                    "difficulty",
+                    item.difficulty
                 );
             }
-        }
 
-        if (!recentCategory) {
-            setError("This recent topic could not be linked to a category. Please search for it instead.");
-            return;
-        }
+            if (
+                item.interview_mode ===
+                    "timed" ||
+                item.interview_mode ===
+                    "untimed"
+            ) {
+                params.set(
+                    "interview_mode",
+                    item.interview_mode
+                );
+            }
 
-        const params = new URLSearchParams();
-        params.set("category", recentCategory);
-        params.set("topic", item.topic);
-
-        if (item.difficulty) {
-            params.set("difficulty", item.difficulty);
-        }
-
-        if (item.interview_mode === "timed" || item.interview_mode === "untimed") {
-            params.set("interview_mode", item.interview_mode);
-        }
-
-        navigate(`/create-interview?${params.toString()}`);
-    };
+            navigate(
+                `/create-interview?${params.toString()}`
+            );
+        };
 
     // ==========================================
     // DIFFICULTY OPTIONS
@@ -574,51 +656,36 @@ function CreateInterview() {
     ];
 
     // ==========================================
-    // FILTERED CATEGORY SUGGESTIONS
+    // QUICK PRACTICE TOPICS
     // ==========================================
 
-    const filteredCategories =
-        categories.filter((item) =>
-            item.label
-                .toLowerCase()
-                .includes(
-                    categorySearch.trim().toLowerCase()
-                )
-        );
-
-    // ==========================================
-    // CURRENT CATEGORY
-    // ==========================================
-
-    const currentCategory =
-        categories.find(
-            (item) =>
-                item.value === category
-        );
-
-    // ==========================================
-    // QUICK PRACTICE CATEGORIES
-    // ==========================================
-
-    const quickPracticeKeys = [
-        "dsa",
-        "backend",
-        "system_design",
+    const quickPracticeTopics = [
+        {
+            topic: "Arrays",
+            category:
+                "Data Structures & Algorithms",
+            description:
+                "Practice array fundamentals and interview patterns.",
+        },
+        {
+            topic: "Binary Search",
+            category:
+                "Data Structures & Algorithms",
+            description:
+                "Practice searching, boundaries, and optimization.",
+        },
+        {
+            topic: "REST APIs",
+            category:
+                "Backend",
+            description:
+                "Practice API design and backend fundamentals.",
+        },
     ];
-
-    const quickPracticeCategories =
-        quickPracticeKeys
-            .map((key) =>
-                categories.find(
-                    (item) => item.value === key
-                )
-            )
-            .filter(Boolean);
 
     // ==========================================
     // UI
     // ==========================================
-
 
     return (
         <div className="min-h-screen bg-[#0B1020] text-[#E5E7EB]">
@@ -735,9 +802,9 @@ function CreateInterview() {
                     </h2>
 
                     <p className="text-[#81899A] mt-3 max-w-2xl leading-7">
-                        Choose a technical area, search
-                        for a topic, and let AI generate
-                        your interview.
+                        Search for any technical
+                        topic and we'll automatically
+                        identify the interview area for you.
                     </p>
 
                 </div>
@@ -746,92 +813,137 @@ function CreateInterview() {
                     QUICK PRACTICE
                 ========================================== */}
 
-                {!category && (
+                {!topic && (
                     <section className="mb-8">
 
-                        {/* POPULAR PRACTICE */}
-
                         <div className="mb-4">
+
                             <h3 className="text-lg font-semibold text-[#DDE1E9]">
                                 Popular Practice
                             </h3>
 
                             <p className="text-sm text-[#70798B] mt-1">
-                                Start with one of the most common interview areas.
+                                Jump into a common interview topic.
                             </p>
+
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {quickPracticeCategories.map((item) => {
 
-                                const initials =
-                                    item.label
-                                        .split(" ")
-                                        .map((word) => word[0])
-                                        .join("")
-                                        .slice(0, 2)
-                                        .toUpperCase();
+                            {quickPracticeTopics.map(
+                                (item) => {
 
-                                return (
-                                    <button
-                                        key={item.value}
-                                        type="button"
-                                        onClick={() =>
-                                            handleCategorySelect(item.value)
-                                        }
-                                        className="
-                                            text-left
-                                            rounded-2xl
-                                            border
-                                            border-[#252F4A]
-                                            bg-[#11182B]
-                                            p-6
-                                            hover:border-[#3B4770]
-                                            hover:bg-[#141C32]
-                                            transition
-                                        "
-                                    >
-                                        <div className="flex items-center justify-between mb-5">
+                                    const initials =
+                                        item.topic
+                                            .split(" ")
+                                            .map(
+                                                (word) =>
+                                                    word[0]
+                                            )
+                                            .join("")
+                                            .slice(
+                                                0,
+                                                2
+                                            )
+                                            .toUpperCase();
 
-                                            <div
-                                                className="
-                                                    w-11
-                                                    h-11
-                                                    rounded-xl
-                                                    bg-[#1A2138]
-                                                    border
-                                                    border-[#2B3554]
-                                                    flex
-                                                    items-center
-                                                    justify-center
-                                                "
-                                            >
-                                                <span className="text-[#A78BFA] font-bold text-xs">
-                                                    {initials}
+                                    return (
+                                        <button
+                                            key={
+                                                item.topic
+                                            }
+                                            type="button"
+                                            onClick={() => {
+                                                setTopic(
+                                                    item.topic
+                                                );
+
+                                                setTopicSearch(
+                                                    item.topic
+                                                );
+
+                                                setSelectedCategory(
+                                                    {
+                                                        value: "",
+                                                        label:
+                                                            item.category,
+                                                    }
+                                                );
+
+                                                setShowTopicResults(
+                                                    false
+                                                );
+                                            }}
+                                            className="
+                                                text-left
+                                                rounded-2xl
+                                                border
+                                                border-[#252F4A]
+                                                bg-[#11182B]
+                                                p-6
+                                                hover:border-[#3B4770]
+                                                hover:bg-[#141C32]
+                                                transition
+                                            "
+                                        >
+
+                                            <div className="flex items-center justify-between mb-5">
+
+                                                <div
+                                                    className="
+                                                        w-11
+                                                        h-11
+                                                        rounded-xl
+                                                        bg-[#1A2138]
+                                                        border
+                                                        border-[#2B3554]
+                                                        flex
+                                                        items-center
+                                                        justify-center
+                                                    "
+                                                >
+                                                    <span className="text-[#A78BFA] font-bold text-xs">
+                                                        {
+                                                            initials
+                                                        }
+                                                    </span>
+                                                </div>
+
+                                                <span className="text-[#4B5563] text-lg">
+                                                    →
                                                 </span>
+
                                             </div>
 
-                                            <span className="text-[#4B5563] text-lg">
-                                                →
-                                            </span>
+                                            <h4 className="text-base font-semibold text-[#D8DCE5]">
+                                                {
+                                                    item.topic
+                                                }
+                                            </h4>
 
-                                        </div>
+                                            <p className="text-xs text-[#7A8497] mt-2">
+                                                {
+                                                    item.category
+                                                }
+                                            </p>
 
-                                        <h4 className="text-base font-semibold text-[#D8DCE5]">
-                                            {item.label}
-                                        </h4>
+                                        </button>
+                                    );
+                                }
+                            )}
 
-                                    </button>
-                                );
-                            })}
                         </div>
 
-                        {/* RECENTLY PRACTICED */}
+                        {/* ==================================
+                            RECENTLY PRACTICED
+                        ================================== */}
 
-                        {recentPractice.length > 0 && (
+                        {recentPractice.length >
+                            0 && (
                             <div className="mt-8">
 
                                 <div className="mb-4">
+
                                     <h3 className="text-lg font-semibold text-[#DDE1E9]">
                                         Recently Practiced
                                     </h3>
@@ -839,59 +951,85 @@ function CreateInterview() {
                                     <p className="text-sm text-[#70798B] mt-1">
                                         Continue practicing topics you worked on recently.
                                     </p>
+
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {recentPractice.map((item) => (
-                                        <button
-                                            key={item.interview_id}
-                                            type="button"
-                                            onClick={() => handleRecentPractice(item)}
-                                            className="
-                                                w-full
-                                                text-left
-                                                rounded-xl
-                                                border
-                                                border-[#252F4A]
-                                                bg-[#11182B]
-                                                px-4
-                                                py-4
-                                                flex
-                                                items-center
-                                                justify-between
-                                                gap-4
-                                                hover:border-[#6366F1]
-                                                hover:bg-[#141C32]
-                                                focus:outline-none
-                                                focus:ring-2
-                                                focus:ring-[#6366F1]/30
-                                                transition
-                                            "
-                                        >
-                                            <div className="min-w-0">
-                                                <p className="text-sm font-medium text-[#D8DCE5] truncate capitalize">
-                                                    {item.topic}
-                                                </p>
 
-                                                <p className="text-xs text-[#687184] mt-1 capitalize">
-                                                    {item.difficulty} · {item.status}
-                                                </p>
-                                            </div>
+                                    {recentPractice.map(
+                                        (item) => (
+                                            <button
+                                                key={
+                                                    item.interview_id
+                                                }
+                                                type="button"
+                                                onClick={() =>
+                                                    handleRecentPractice(
+                                                        item
+                                                    )
+                                                }
+                                                className="
+                                                    w-full
+                                                    text-left
+                                                    rounded-xl
+                                                    border
+                                                    border-[#252F4A]
+                                                    bg-[#11182B]
+                                                    px-4
+                                                    py-4
+                                                    flex
+                                                    items-center
+                                                    justify-between
+                                                    gap-4
+                                                    hover:border-[#6366F1]
+                                                    hover:bg-[#141C32]
+                                                    focus:outline-none
+                                                    focus:ring-2
+                                                    focus:ring-[#6366F1]/30
+                                                    transition
+                                                "
+                                            >
 
-                                            <span className="text-xs text-[#8B5CF6] shrink-0">
-                                                Practice →
-                                            </span>
-                                        </button>
-                                    ))}
+                                                <div className="min-w-0">
+
+                                                    <p className="text-sm font-medium text-[#D8DCE5] truncate capitalize">
+                                                        {
+                                                            item.topic
+                                                        }
+                                                    </p>
+
+                                                    <p className="text-xs text-[#687184] mt-1 capitalize">
+                                                        {
+                                                            item.difficulty
+                                                        }{" "}
+                                                        ·{" "}
+                                                        {
+                                                            item.status
+                                                        }
+                                                    </p>
+
+                                                </div>
+
+                                                <span className="text-xs text-[#8B5CF6] shrink-0">
+                                                    Practice →
+                                                </span>
+
+                                            </button>
+                                        )
+                                    )}
+
                                 </div>
+
                             </div>
                         )}
 
                         {recentPracticeLoading && (
                             <div className="mt-8">
+
                                 <p className="text-sm text-[#687184]">
                                     Loading recent practice...
                                 </p>
+
                             </div>
                         )}
 
@@ -913,279 +1051,9 @@ function CreateInterview() {
                     "
                 >
 
-                    {/* CATEGORY */}
-
-                    <div className="mb-7">
-
-                        <label
-                            htmlFor="category"
-                            className="block text-sm font-medium text-[#B8BFCC] mb-2"
-                        >
-                            Interview Category
-                        </label>
-
-                        <p className="text-xs text-[#697386] mb-3">
-                            Choose the area you want to practice.
-                        </p>
-
-                        <div className="relative">
-
-                            <div
-                                className="
-                                    absolute
-                                    left-4
-                                    top-1/2
-                                    -translate-y-1/2
-                                    text-[#5E687C]
-                                    pointer-events-none
-                                "
-                            >
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.8"
-                                    className="w-5 h-5"
-                                >
-                                    <circle
-                                        cx="11"
-                                        cy="11"
-                                        r="6.5"
-                                    />
-                                    <path
-                                        strokeLinecap="round"
-                                        d="M16 16l4.5 4.5"
-                                    />
-                                </svg>
-                            </div>
-
-                            <input
-                                id="category"
-                                type="text"
-                                value={categorySearch}
-                                onChange={(event) => {
-                                    const value =
-                                        event.target.value;
-
-                                    setCategorySearch(value);
-                                    setShowCategoryResults(
-                                        Boolean(value.trim())
-                                    );
-
-                                    // A category is considered selected only
-                                    // after the user chooses a suggestion.
-                                    if (category) {
-                                        setCategory("");
-                                        setTopic("");
-                                        setTopicSearch("");
-                                        setTopics([]);
-                                        setShowTopicResults(false);
-                                    }
-
-                                    setError("");
-                                }}
-                                onFocus={() => {
-                                    if (categorySearch.trim()) {
-                                        setShowCategoryResults(true);
-                                    }
-                                }}
-                                disabled={categoriesLoading}
-                                placeholder={
-                                    categoriesLoading
-                                        ? "Loading categories..."
-                                        : "Type to search categories, e.g. DSA, Backend..."
-                                }
-                                className="
-                                    w-full
-                                    bg-[#0B1020]
-                                    border
-                                    border-[#293452]
-                                    rounded-xl
-                                    pl-12
-                                    pr-4
-                                    py-3.5
-                                    text-sm
-                                    text-[#D8DCE5]
-                                    placeholder:text-[#545D70]
-                                    outline-none
-                                    focus:border-[#6366F1]
-                                    focus:ring-1
-                                    focus:ring-[#6366F1]/20
-                                    transition
-                                    disabled:opacity-50
-                                    disabled:cursor-not-allowed
-                                "
-                            />
-
-                            {showCategoryResults &&
-                                categorySearch.trim() &&
-                                !categoriesLoading && (
-                                    <div
-                                        className="
-                                            absolute
-                                            left-0
-                                            right-0
-                                            top-full
-                                            mt-2
-                                            z-30
-                                            bg-[#11182B]
-                                            border
-                                            border-[#303A56]
-                                            rounded-xl
-                                            shadow-2xl
-                                            shadow-black/30
-                                            overflow-hidden
-                                        "
-                                    >
-                                        {filteredCategories.length > 0 ? (
-                                            <div className="max-h-72 overflow-y-auto py-2">
-                                                {filteredCategories.map((item) => {
-                                                    const selected =
-                                                        category === item.value;
-
-                                                    return (
-                                                        <button
-                                                            key={item.value}
-                                                            type="button"
-                                                            onClick={() =>
-                                                                handleCategorySelect(
-                                                                    item.value
-                                                                )
-                                                            }
-                                                            className={`
-                                                                w-full
-                                                                px-4
-                                                                py-3
-                                                                text-left
-                                                                flex
-                                                                items-center
-                                                                justify-between
-                                                                gap-4
-                                                                transition
-                                                                ${selected
-                                                                    ? "bg-[#1E2540] text-[#C4B5FD]"
-                                                                    : "text-[#B8BFCD] hover:bg-[#151D33] hover:text-[#E5E7EB]"
-                                                                }
-                                                            `}
-                                                        >
-                                                            <div className="min-w-0">
-                                                                <p className="text-sm truncate">
-                                                                    {item.label}
-                                                                </p>
-                                                                {item.description && (
-                                                                    <p className="text-xs text-[#667085] mt-1 truncate">
-                                                                        {item.description}
-                                                                    </p>
-                                                                )}
-                                                            </div>
-
-                                                            {selected && (
-                                                                <svg
-                                                                    xmlns="http://www.w3.org/2000/svg"
-                                                                    viewBox="0 0 24 24"
-                                                                    fill="none"
-                                                                    stroke="currentColor"
-                                                                    strokeWidth="2"
-                                                                    className="w-4 h-4 shrink-0 text-[#8B5CF6]"
-                                                                >
-                                                                    <path
-                                                                        strokeLinecap="round"
-                                                                        strokeLinejoin="round"
-                                                                        d="M5 12.5l4 4L19 7"
-                                                                    />
-                                                                </svg>
-                                                            )}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        ) : (
-                                            <div className="px-5 py-5">
-                                                <p className="text-sm text-[#8992A4]">
-                                                    No matching categories found.
-                                                </p>
-                                                <p className="text-xs text-[#606A7D] mt-1">
-                                                    Try another keyword.
-                                                </p>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                        </div>
-
-                    </div>
-
-                    {/* SELECTED CATEGORY */}
-
-                    {currentCategory && (
-                        <div
-                            className="
-                                flex
-                                items-center
-                                gap-3
-                                mb-7
-                                px-4
-                                py-3
-                                rounded-xl
-                                bg-[#151D33]
-                                border
-                                border-[#2A3454]
-                            "
-                        >
-
-                            <div
-                                className="
-                                    w-9
-                                    h-9
-                                    rounded-lg
-                                    bg-[#20284A]
-                                    border
-                                    border-[#343D63]
-                                    flex
-                                    items-center
-                                    justify-center
-                                    shrink-0
-                                "
-                            >
-                                <span className="text-[#A78BFA] text-xs font-bold">
-                                    {currentCategory.label
-                                        .split(" ")
-                                        .map(
-                                            (word) =>
-                                                word[0]
-                                        )
-                                        .join("")
-                                        .slice(
-                                            0,
-                                            2
-                                        )
-                                        .toUpperCase()}
-                                </span>
-                            </div>
-
-                            <div>
-
-                                <p className="text-sm font-medium text-[#D8DCE5]">
-                                    {
-                                        currentCategory.label
-                                    }
-                                </p>
-
-                                <p className="text-xs text-[#6F7889] mt-0.5">
-                                    {
-                                        currentCategory.description ||
-                                        "Technical interview practice"
-                                    }
-                                </p>
-
-                            </div>
-
-                        </div>
-                    )}
-
-                    {/* TOPIC SEARCH */}
+                    {/* ==================================
+                        TOPIC SEARCH
+                    ================================== */}
 
                     <div className="mb-7">
 
@@ -1197,7 +1065,7 @@ function CreateInterview() {
                         </label>
 
                         <p className="text-xs text-[#697386] mb-3">
-                            Search for a topic within your selected category.
+                            Start typing a technical topic. We'll automatically identify its category.
                         </p>
 
                         <div className="relative">
@@ -1225,6 +1093,7 @@ function CreateInterview() {
                                         cy="11"
                                         r="6.5"
                                     />
+
                                     <path
                                         strokeLinecap="round"
                                         d="M16 16l4.5 4.5"
@@ -1235,8 +1104,11 @@ function CreateInterview() {
                             <input
                                 id="topic-search"
                                 type="text"
-                                value={topicSearch}
+                                value={
+                                    topicSearch
+                                }
                                 onChange={(event) => {
+
                                     const value =
                                         event.target
                                             .value;
@@ -1245,17 +1117,24 @@ function CreateInterview() {
                                         value
                                     );
 
-                                    // Clear previously selected
-                                    // topic if user starts typing again.
+                                    // Clear previous selection
+                                    // when user starts typing.
                                     setTopic("");
+
+                                    setSelectedCategory(
+                                        null
+                                    );
 
                                     setShowTopicResults(
                                         Boolean(
                                             value.trim()
                                         )
                                     );
+
+                                    setError("");
                                 }}
                                 onFocus={() => {
+
                                     if (
                                         topicSearch.trim()
                                     ) {
@@ -1263,13 +1142,9 @@ function CreateInterview() {
                                             true
                                         );
                                     }
+
                                 }}
-                                disabled={!category}
-                                placeholder={
-                                    category
-                                        ? "Search topics, e.g. tree, redis, process..."
-                                        : "Select a category first"
-                                }
+                                placeholder="Search topics, e.g. tree, redis, docker, jwt..."
                                 className="
                                     w-full
                                     bg-[#0B1020]
@@ -1287,8 +1162,6 @@ function CreateInterview() {
                                     focus:ring-1
                                     focus:ring-[#6366F1]/20
                                     transition
-                                    disabled:opacity-50
-                                    disabled:cursor-not-allowed
                                 "
                             />
 
@@ -1320,7 +1193,6 @@ function CreateInterview() {
                             ================================== */}
 
                             {showTopicResults &&
-                                category &&
                                 topicSearch.trim() &&
                                 !topicsLoading && (
 
@@ -1353,14 +1225,16 @@ function CreateInterview() {
                                                     ) => {
 
                                                         const selected =
-                                                            topic ===
-                                                            item;
+                                                            topic
+                                                                .trim()
+                                                                .toLowerCase() ===
+                                                            item.topic
+                                                                ?.trim()
+                                                                .toLowerCase();
 
                                                         return (
                                                             <button
-                                                                key={
-                                                                    item
-                                                                }
+                                                                key={`${item.category}-${item.topic}`}
                                                                 type="button"
                                                                 onClick={() =>
                                                                     handleTopicSelect(
@@ -1377,18 +1251,39 @@ function CreateInterview() {
                                                                     justify-between
                                                                     gap-4
                                                                     transition
-                                                                    ${selected
-                                                                        ? "bg-[#1E2540] text-[#C4B5FD]"
-                                                                        : "text-[#B8BFCD] hover:bg-[#151D33] hover:text-[#E5E7EB]"
+                                                                    ${
+                                                                        selected
+                                                                            ? "bg-[#1E2540]"
+                                                                            : "hover:bg-[#151D33]"
                                                                     }
                                                                 `}
                                                             >
 
-                                                                <span className="text-sm">
-                                                                    {
-                                                                        item
-                                                                    }
-                                                                </span>
+                                                                <div className="min-w-0">
+
+                                                                    <p
+                                                                        className={`
+                                                                            text-sm
+                                                                            truncate
+                                                                            ${
+                                                                                selected
+                                                                                    ? "text-[#C4B5FD]"
+                                                                                    : "text-[#B8BFCD]"
+                                                                            }
+                                                                        `}
+                                                                    >
+                                                                        {
+                                                                            item.topic
+                                                                        }
+                                                                    </p>
+
+                                                                    <p className="text-xs text-[#697386] mt-1">
+                                                                        {
+                                                                            item.category_label
+                                                                        }
+                                                                    </p>
+
+                                                                </div>
 
                                                                 {selected && (
                                                                     <svg
@@ -1423,8 +1318,25 @@ function CreateInterview() {
                                                 </p>
 
                                                 <p className="text-xs text-[#606A7D] mt-1">
-                                                    Try another keyword within this category.
+                                                    You can ask AI to verify a custom technical topic.
                                                 </p>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={
+                                                        handleOpenCustomTopic
+                                                    }
+                                                    className="
+                                                        mt-4
+                                                        text-sm
+                                                        font-medium
+                                                        text-[#A78BFA]
+                                                        hover:text-[#C4B5FD]
+                                                        transition
+                                                    "
+                                                >
+                                                    Can't find your topic?
+                                                </button>
 
                                             </div>
 
@@ -1443,12 +1355,8 @@ function CreateInterview() {
                             <div
                                 className="
                                     mt-4
-                                    flex
-                                    items-center
-                                    justify-between
-                                    gap-4
                                     px-4
-                                    py-3
+                                    py-4
                                     rounded-xl
                                     bg-[#151D33]
                                     border
@@ -1456,37 +1364,89 @@ function CreateInterview() {
                                 "
                             >
 
-                                <div>
+                                <div className="flex items-start justify-between gap-4">
 
-                                    <p className="text-[10px] uppercase tracking-widest text-[#687184]">
-                                        Selected Topic
-                                    </p>
+                                    <div>
 
-                                    <p className="text-sm font-medium text-[#D8DCE5] mt-1 capitalize">
-                                        {topic}
-                                    </p>
+                                        <p className="text-[10px] uppercase tracking-widest text-[#687184]">
+                                            Selected Topic
+                                        </p>
+
+                                        <p className="text-sm font-medium text-[#D8DCE5] mt-1">
+                                            {topic}
+                                        </p>
+
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={
+                                            handleChangeTopic
+                                        }
+                                        className="
+                                            text-xs
+                                            text-[#697386]
+                                            hover:text-[#C4B5FD]
+                                            transition
+                                        "
+                                    >
+                                        Change
+                                    </button>
 
                                 </div>
 
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setTopic("");
-                                        setTopicSearch("");
-                                        setTopics([]);
-                                        setShowTopicResults(
-                                            false
-                                        );
-                                    }}
-                                    className="
-                                        text-xs
-                                        text-[#697386]
-                                        hover:text-[#C4B5FD]
-                                        transition
-                                    "
-                                >
-                                    Change
-                                </button>
+                                {/* AUTO DETECTED CATEGORY */}
+
+                                {selectedCategory && (
+                                    <div
+                                        className="
+                                            mt-4
+                                            pt-4
+                                            border-t
+                                            border-[#293452]
+                                            flex
+                                            items-center
+                                            gap-3
+                                        "
+                                    >
+
+                                        <div
+                                            className="
+                                                w-8
+                                                h-8
+                                                rounded-lg
+                                                bg-[#20284A]
+                                                border
+                                                border-[#343D63]
+                                                flex
+                                                items-center
+                                                justify-center
+                                                shrink-0
+                                            "
+                                        >
+
+                                            <span className="text-[#A78BFA] text-xs font-bold">
+                                                AI
+                                            </span>
+
+                                        </div>
+
+                                        <div>
+
+                                            <p className="text-[10px] uppercase tracking-widest text-[#687184]">
+                                                Detected Category
+                                            </p>
+
+                                            <p className="text-xs font-medium text-[#C4B5FD] mt-1">
+                                                {
+                                                    selectedCategory.label
+                                                }
+                                            </p>
+
+                                        </div>
+
+                                    </div>
+                                )}
 
                             </div>
                         )}
@@ -1538,9 +1498,10 @@ function CreateInterview() {
                                                 border
                                                 transition
                                                 duration-200
-                                                ${selected
-                                                    ? "bg-[#1A203A] border-[#6366F1]"
-                                                    : "bg-[#0D1425] border-[#293452] hover:border-[#39476D]"
+                                                ${
+                                                    selected
+                                                        ? "bg-[#1A203A] border-[#6366F1]"
+                                                        : "bg-[#0D1425] border-[#293452] hover:border-[#39476D]"
                                                 }
                                             `}
                                         >
@@ -1551,9 +1512,10 @@ function CreateInterview() {
                                                     className={`
                                                         text-sm
                                                         font-semibold
-                                                        ${selected
-                                                            ? "text-[#C4B5FD]"
-                                                            : "text-[#C5CBD6]"
+                                                        ${
+                                                            selected
+                                                                ? "text-[#C4B5FD]"
+                                                                : "text-[#C5CBD6]"
                                                         }
                                                     `}
                                                 >
@@ -1571,9 +1533,10 @@ function CreateInterview() {
                                                         flex
                                                         items-center
                                                         justify-center
-                                                        ${selected
-                                                            ? "border-[#8B5CF6]"
-                                                            : "border-[#46516D]"
+                                                        ${
+                                                            selected
+                                                                ? "border-[#8B5CF6]"
+                                                                : "border-[#46516D]"
                                                         }
                                                     `}
                                                 >
@@ -1608,57 +1571,129 @@ function CreateInterview() {
                     <div className="mt-8">
 
                         <div className="mb-5">
+
                             <h3 className="text-base font-semibold text-[#DDE1E9]">
                                 Interview Mode
                             </h3>
+
                             <p className="text-sm text-[#70798B] mt-1">
                                 Choose whether you want to practice with a question time limit.
                             </p>
+
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
                             {[
                                 {
                                     value: "timed",
                                     label: "Timed Interview",
-                                    description: "Practice under interview pressure with a fixed time per question.",
-                                    details: "Easy 3 min · Medium 5 min · Hard 8 min",
+                                    description:
+                                        "Practice under interview pressure with a fixed time per question.",
+                                    details:
+                                        "Easy 3 min · Medium 5 min · Hard 8 min",
                                 },
                                 {
                                     value: "untimed",
                                     label: "No Timer",
-                                    description: "Take your time and focus on understanding and explaining the solution.",
-                                    details: "No question deadline",
+                                    description:
+                                        "Take your time and focus on understanding and explaining the solution.",
+                                    details:
+                                        "No question deadline",
                                 },
-                            ].map((item) => {
-                                const selected = interviewMode === item.value;
+                            ].map(
+                                (item) => {
 
-                                return (
-                                    <button
-                                        key={item.value}
-                                        type="button"
-                                        onClick={() => setInterviewMode(item.value)}
-                                        className={`text-left p-5 rounded-xl border transition duration-200 ${selected ? "bg-[#1A203A] border-[#6366F1]" : "bg-[#0D1425] border-[#293452] hover:border-[#39476D]"}`}
-                                    >
-                                        <div className="flex items-center justify-between mb-3">
-                                            <span className={`text-sm font-semibold ${selected ? "text-[#C4B5FD]" : "text-[#C5CBD6]"}`}>
-                                                {item.label}
-                                            </span>
-                                            <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${selected ? "border-[#8B5CF6]" : "border-[#46516D]"}`}>
-                                                {selected && <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />}
-                                            </span>
-                                        </div>
+                                    const selected =
+                                        interviewMode ===
+                                        item.value;
 
-                                        <p className="text-xs text-[#737C8E] leading-5">
-                                            {item.description}
-                                        </p>
+                                    return (
+                                        <button
+                                            key={
+                                                item.value
+                                            }
+                                            type="button"
+                                            onClick={() =>
+                                                setInterviewMode(
+                                                    item.value
+                                                )
+                                            }
+                                            className={`
+                                                text-left
+                                                p-5
+                                                rounded-xl
+                                                border
+                                                transition
+                                                duration-200
+                                                ${
+                                                    selected
+                                                        ? "bg-[#1A203A] border-[#6366F1]"
+                                                        : "bg-[#0D1425] border-[#293452] hover:border-[#39476D]"
+                                                }
+                                            `}
+                                        >
 
-                                        <p className="text-xs text-[#A78BFA] mt-3">
-                                            {item.details}
-                                        </p>
-                                    </button>
-                                );
-                            })}
+                                            <div className="flex items-center justify-between mb-3">
+
+                                                <span
+                                                    className={`
+                                                        text-sm
+                                                        font-semibold
+                                                        ${
+                                                            selected
+                                                                ? "text-[#C4B5FD]"
+                                                                : "text-[#C5CBD6]"
+                                                        }
+                                                    `}
+                                                >
+                                                    {
+                                                        item.label
+                                                    }
+                                                </span>
+
+                                                <span
+                                                    className={`
+                                                        w-4
+                                                        h-4
+                                                        rounded-full
+                                                        border
+                                                        flex
+                                                        items-center
+                                                        justify-center
+                                                        ${
+                                                            selected
+                                                                ? "border-[#8B5CF6]"
+                                                                : "border-[#46516D]"
+                                                        }
+                                                    `}
+                                                >
+
+                                                    {selected && (
+                                                        <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />
+                                                    )}
+
+                                                </span>
+
+                                            </div>
+
+                                            <p className="text-xs text-[#737C8E] leading-5">
+                                                {
+                                                    item.description
+                                                }
+                                            </p>
+
+                                            <p className="text-xs text-[#A78BFA] mt-3">
+                                                {
+                                                    item.details
+                                                }
+                                            </p>
+
+                                        </button>
+                                    );
+                                }
+                            )}
+
                         </div>
 
                     </div>
@@ -1698,9 +1733,11 @@ function CreateInterview() {
                                 shrink-0
                             "
                         >
+
                             <span className="text-[#A78BFA] text-xs font-bold">
                                 AI
                             </span>
+
                         </div>
 
                         <div>
@@ -1779,7 +1816,6 @@ function CreateInterview() {
                         onClick={handleSubmit}
                         disabled={
                             loading ||
-                            !category ||
                             !topic
                         }
                         className="
@@ -1810,6 +1846,277 @@ function CreateInterview() {
                 </div>
 
             </main>
+
+            {/* ==========================================
+                CUSTOM TOPIC MODAL
+            ========================================== */}
+
+            {showCustomTopicModal && (
+                <div
+                    className="
+                        fixed
+                        inset-0
+                        z-50
+                        flex
+                        items-center
+                        justify-center
+                        bg-black/60
+                        backdrop-blur-sm
+                        px-4
+                    "
+                    onMouseDown={(event) => {
+
+                        if (
+                            event.target ===
+                                event.currentTarget &&
+                            !customTopicLoading
+                        ) {
+                            handleCloseCustomTopic();
+                        }
+
+                    }}
+                >
+
+                    <div
+                        className="
+                            w-full
+                            max-w-md
+                            rounded-2xl
+                            border
+                            border-[#303A56]
+                            bg-[#11182B]
+                            shadow-2xl
+                            shadow-black/40
+                            p-6
+                        "
+                    >
+
+                        <div className="flex items-start justify-between gap-4">
+
+                            <div>
+
+                                <h3 className="text-lg font-semibold text-[#E5E7EB]">
+                                    Enter your topic
+                                </h3>
+
+                                <p className="text-sm text-[#7E8799] mt-2 leading-6">
+                                    We'll verify that this is a technical
+                                    topic, identify its category, and generate
+                                    your interview questions in one step.
+                                </p>
+
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={
+                                    handleCloseCustomTopic
+                                }
+                                disabled={
+                                    customTopicLoading
+                                }
+                                className="
+                                    text-[#687184]
+                                    hover:text-[#D1D5DB]
+                                    disabled:opacity-40
+                                    transition
+                                "
+                                aria-label="Close custom topic dialog"
+                            >
+
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.8"
+                                    className="w-5 h-5"
+                                >
+
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M6 6l12 12M18 6L6 18"
+                                    />
+
+                                </svg>
+
+                            </button>
+
+                        </div>
+
+                        <div className="mt-6">
+
+                            <label
+                                htmlFor="custom-topic"
+                                className="
+                                    block
+                                    text-sm
+                                    font-medium
+                                    text-[#B8BFCC]
+                                    mb-2
+                                "
+                            >
+                                Topic
+                            </label>
+
+                            <input
+                                id="custom-topic"
+                                type="text"
+                                value={
+                                    customTopic
+                                }
+                                onChange={(event) =>
+                                    setCustomTopic(
+                                        event.target
+                                            .value
+                                    )
+                                }
+                                onKeyDown={(event) => {
+
+                                    if (
+                                        event.key ===
+                                            "Enter" &&
+                                        !customTopicLoading
+                                    ) {
+                                        event.preventDefault();
+
+                                        handleCustomTopicSubmit();
+                                    }
+
+                                }}
+                                autoFocus
+                                disabled={
+                                    customTopicLoading
+                                }
+                                placeholder="e.g. Kubernetes Operators"
+                                className="
+                                    w-full
+                                    bg-[#0B1020]
+                                    border
+                                    border-[#293452]
+                                    rounded-xl
+                                    px-4
+                                    py-3.5
+                                    text-sm
+                                    text-[#D8DCE5]
+                                    placeholder:text-[#545D70]
+                                    outline-none
+                                    focus:border-[#6366F1]
+                                    focus:ring-1
+                                    focus:ring-[#6366F1]/20
+                                    transition
+                                    disabled:opacity-50
+                                "
+                            />
+
+                            {customTopicError && (
+                                <div
+                                    className="
+                                        mt-4
+                                        rounded-xl
+                                        border
+                                        border-red-500/20
+                                        bg-red-500/5
+                                        px-3
+                                        py-2.5
+                                    "
+                                >
+
+                                    <p className="text-xs leading-5 text-red-400">
+                                        {
+                                            customTopicError
+                                        }
+                                    </p>
+
+                                </div>
+                            )}
+
+                        </div>
+
+                        <div className="flex justify-end gap-3 mt-7">
+
+                            <button
+                                type="button"
+                                onClick={
+                                    handleCloseCustomTopic
+                                }
+                                disabled={
+                                    customTopicLoading
+                                }
+                                className="
+                                    px-4
+                                    py-2.5
+                                    rounded-xl
+                                    border
+                                    border-[#303A56]
+                                    text-sm
+                                    text-[#81899A]
+                                    hover:text-[#D1D5DB]
+                                    hover:border-[#46516E]
+                                    disabled:opacity-40
+                                    transition
+                                "
+                            >
+                                Cancel
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={
+                                    handleCustomTopicSubmit
+                                }
+                                disabled={
+                                    customTopicLoading ||
+                                    !customTopic.trim()
+                                }
+                                className="
+                                    px-5
+                                    py-2.5
+                                    rounded-xl
+                                    bg-gradient-to-r
+                                    from-[#6366F1]
+                                    to-[#8B5CF6]
+                                    hover:from-[#7073F5]
+                                    hover:to-[#9568F8]
+                                    disabled:opacity-50
+                                    disabled:cursor-not-allowed
+                                    text-white
+                                    text-sm
+                                    font-semibold
+                                    transition
+                                    flex
+                                    items-center
+                                    gap-2
+                                "
+                            >
+
+                                {customTopicLoading && (
+                                    <span
+                                        className="
+                                            w-4
+                                            h-4
+                                            rounded-full
+                                            border-2
+                                            border-white/30
+                                            border-t-white
+                                            animate-spin
+                                        "
+                                    />
+                                )}
+
+                                {customTopicLoading
+                                    ? "Verifying..."
+                                    : "Continue"}
+
+                            </button>
+
+                        </div>
+
+                    </div>
+
+                </div>
+            )}
 
         </div>
     );
