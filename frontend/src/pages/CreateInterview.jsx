@@ -5,9 +5,8 @@ import {
 } from "react-router-dom";
 
 import { createInterview } from "../api/interview";
+import { API_URL } from "../api/config";
 import { useAuth } from "../context/AuthContext";
-
-const API_URL = "http://127.0.0.1:8000";
 
 function CreateInterview() {
     const navigate = useNavigate();

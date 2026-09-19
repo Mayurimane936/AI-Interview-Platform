@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
+import { API_URL } from "../api/config";
 import { deleteInterview } from "../api/interview";
-
-const API_URL = "http://127.0.0.1:8000";
 
 function Dashboard() {
   const navigate = useNavigate();

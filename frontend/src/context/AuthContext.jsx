@@ -4,10 +4,9 @@ import {
   useEffect,
   useState,
 } from "react";
+import { API_URL } from "../api/config";
 
 const AuthContext = createContext(null);
-
-const API_URL = "http://127.0.0.1:8000";
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(
